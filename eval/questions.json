@@ -1,0 +1,102 @@
+[
+    {
+        "question": "What is the definition of agricultural income?",
+        "expected_section": "Section 2",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "When does the Income-tax Act, 2025 come into force?",
+        "expected_section": "Section 1",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "What is the meaning of advance tax under the Income-tax Act?",
+        "expected_section": "Section 2",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "What is the definition of amalgamation under the Income-tax Act?",
+        "expected_section": "Section 2",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "Who is considered an assessee under the Income-tax Act?",
+        "expected_section": "Section 2",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "To which geographical area does the Income-tax Act, 2025 extend?",
+        "expected_section": "Section 1",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "What is the meaning of tax year under the Income-tax Act, 2025?",
+        "expected_section": "Section 3",
+        "law_type": "income_tax"
+    },
+    {
+        "question": "What is the meaning of capital goods under the CGST Act?",
+        "expected_section": "CHAPTER I PRELIMINARY",
+        "law_type": "gst"
+    },
+    {
+        "question": "What is the definition of aggregate turnover under the CGST Act?",
+        "expected_section": "CHAPTER I PRELIMINARY",
+        "law_type": "gst"
+    },
+    {
+        "question": "What is the definition of business under the CGST Act?",
+        "expected_section": "CHAPTER I PRELIMINARY",
+        "law_type": "gst"
+    },
+    {
+        "question": "What clarification was issued regarding GST on extruded or expanded savoury food products?",
+        "expected_section": "Clarification regarding GST rate on Extruded/Expanded Savoury food products",
+        "law_type": "gst"
+    },
+    {
+        "question": "What clarification was issued regarding late fee for delayed filing of FORM GSTR-9C?",
+        "expected_section": "Waiver of Late Fee",
+        "law_type": "gst"
+    },
+    {
+        "question": "When is quoting of Document Identification Number (DIN) not required on GST communications?",
+        "expected_section": "Clarification on DIN vs RFN",
+        "law_type": "gst"
+    },
+    {
+        "question": "When do the RBI Registration, Exemptions and Framework for Scale Based Regulation Directions, 2025 come into effect?",
+        "expected_section": "# RBI-1",
+        "law_type": "rbi"
+    },
+    {
+        "question": "Which NBFCs are covered under the RBI Scale Based Regulation Directions?",
+        "expected_section": "3.",
+        "law_type": "rbi"
+    },
+    {
+        "question": "What is the applicability of the RBI Know Your Customer Directions, 2025?",
+        "expected_section": "3.",
+        "law_type": "rbi"
+    },
+    {
+        "question": "Who is considered a beneficial owner under the RBI KYC Directions?",
+        "expected_section": "72.",
+        "law_type": "rbi"
+    },
+    {
+        "question": "Which NBFCs are covered under the RBI Income Recognition, Asset Classification and Provisioning Directions, 2025?",
+        "expected_section": "3.",
+        "law_type": "rbi"
+    },
+    {
+        "question": "What is the definition of a Non-Banking Financial Company (NBFC) under the RBI Directions?",
+        "expected_section": "72.",
+        "law_type": "rbi"
+    },
+    {
+        "question": "What is the scope of total income for a resident individual under the Income-tax Act, 2025?",
+        "expected_section": "Section 5",
+        "law_type": "income_tax"
+    }
+]

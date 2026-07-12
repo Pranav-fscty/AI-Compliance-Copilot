@@ -1,0 +1,60 @@
+# Environment variables
+.env
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Local database and raw data
+chroma_db/
+data/raw/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# MLflow runs
+.mlruns/
+mlruns/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Python build and distribution artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# Editor / IDE configuration directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
