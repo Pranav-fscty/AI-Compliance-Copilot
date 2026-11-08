@@ -11,3 +11,6 @@ chroma_db/
 mlruns/
 eval/checkpoints/
 data/processed/
+ground_truth/
+eval/
+presets/*.local.yaml

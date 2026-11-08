@@ -4,6 +4,18 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Phase 4: separate services, presets, ground truth, black-box API
+
+- **docker-compose with 4 services:** `api`, `chroma` (server mode, `chromadb/chroma:0.5.3` = client pin), `ollama`, `mlflow` (v2.16.0 = client pin), each with a healthcheck; `api` waits for healthy `chroma` and `ollama`. Ollama reuses the host's models folder; `docker-compose.gpu.yml` adds the NVIDIA GPU.
+  - **Not run end to end.** Docker Desktop's engine would not start on this machine (its log shows a failed Docker sign-in token refresh). What was verified: both compose files pass `docker compose config`; Chroma server mode was tested outside Docker with `chroma run` (same retrieval hit@k as embedded mode; MRR differs in the 4th decimal because the HNSW graph was built in another process).
+- **Presets** selected by `RAG_PRESET`: `default` (Phase 2 pipeline, fully evaluated), `bge_small` (best retriever, retrieval-only eval), `nomic` (Ollama embedder, top_k 5), `small_llm` (qwen3.5:4b, top_k 4, not evaluated). Precedence: `config.yaml` < preset < `RAG_*` env. Unknown preset names, unknown preset keys, or misspelled `RAG_*` variables raise an error.
+- **Ground truth:** `python -m src.manifest` writes `ground_truth/pipeline_manifest.json` for the active preset from config plus live facts (chunk counts and token lengths, collection size, metric and `search_ef`, embedding dimension, Ollama model digests, prompt and its sha256, git commit + dirty flag). The API never reads it; `ground_truth/` is gitignored and excluded from the image.
+- **Black-box API:** `/docs`, `/redoc` and `/openapi.json` are off. `POST /debug/retrieve` (and the docs) exist only with `debug_endpoints: true`; default false.
+- **Structured logs:** one JSON object per line with `request_id`. The id is taken from a client `X-Request-ID` if it matches `[A-Za-z0-9._-]{1,64}`, otherwise generated, and returned in the `X-Request-ID` response header. One `request` line per call with method, path, status, duration_ms. uvicorn's own access log is off.
+- **Failure behaviour (checked):** Chroma down: `/health` 503 `{"index":"error"}`, `/ask` 500. No fault-injection hooks exist in the app; faults are meant to be injected from outside (stop/slow/corrupt a container).
+- Chunk files moved to `data/processed/chunks/<collection>/` so presets with different chunking don't overwrite each other; they are derived and no longer committed.
+- Eval runner honours `MLFLOW_TRACKING_URI` (to log into the compose `mlflow` service); a Chroma server has no local SQLite file, so `chroma_sqlite_sha` is only logged in embedded mode.
+
 ## Phase 3: embedder and LLM benchmark
 
 Command: `python -m eval.bench embedders` (each candidate chunked and indexed into its own Chroma collection,

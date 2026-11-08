@@ -1,0 +1,10 @@
+# Optional override: give the ollama container the NVIDIA GPU (Docker Desktop + WSL2 + NVIDIA driver).
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

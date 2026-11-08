@@ -1,15 +1,81 @@
+# Four separate services so each can be stopped, slowed or corrupted on its own:
+#   api     FastAPI app (the only service RAG X-Ray should talk to)
+#   chroma  vector store in client/server mode
+#   ollama  LLM (+ Ollama embedders)
+#   mlflow  experiment tracking for eval runs
+#
+# First run:   docker compose up -d --build
+#              docker compose exec ollama ollama pull llama3.1      (once; skipped if models dir is shared)
+#              docker compose run --rm api python -m src.embed_store  (build the index for RAG_PRESET)
+# Preset:      RAG_PRESET=fast docker compose up -d
+# GPU Ollama:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+x-py-health: &py-health
+  interval: 10s
+  timeout: 5s
+  retries: 30
+  start_period: 20s
+
 services:
-  compliance-copilot:
+  api:
     build: .
     ports:
       - "8000:8000"
     environment:
-      # Ollama runs on the Windows host; "localhost" inside the container is the container itself.
-      RAG_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RAG_PRESET: ${RAG_PRESET:-default}
+      RAG_CHROMA_HOST: chroma
+      RAG_CHROMA_PORT: "8000"
+      RAG_OLLAMA_BASE_URL: http://ollama:11434
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
-      - ./chroma_db:/app/chroma_db
-      - hf-cache:/root/.cache/huggingface   # embedder download survives rebuilds
+      - ./data/processed:/app/data/processed       # processed docs + chunk files (src.chunk writes, src.embed_store reads)
+      - hf-cache:/root/.cache/huggingface          # HF embedder download survives rebuilds
+    depends_on:
+      chroma: {condition: service_healthy}
+      ollama: {condition: service_healthy}
+    healthcheck:
+      <<: *py-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
     restart: on-failure
+
+  chroma:
+    image: chromadb/chroma:0.5.3   # must match the chromadb client pin in requirements.txt
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - chroma-data:/chroma/chroma
+    ports:
+      - "8001:8000"   # host access for the eval runner (RAG_CHROMA_HOST=localhost RAG_CHROMA_PORT=8001)
+    healthcheck:
+      <<: *py-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat', timeout=4)"]
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-0.40.12}   # match the host Ollama: the shared models dir uses its on-disk format
+    volumes:
+      # Reuse the Windows host's pulled models instead of downloading ~10 GB again.
+      - ${OLLAMA_MODELS_DIR:-${USERPROFILE:-~}/.ollama/models}:/root/.ollama/models
+    # Not published: the host's own Ollama already owns 11434.
+    healthcheck:
+      <<: *py-health
+      test: ["CMD", "ollama", "list"]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.0   # same version as the client pin
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri /mlflow/mlruns --artifacts-destination /mlflow/artifacts --serve-artifacts
+    volumes:
+      - mlflow-data:/mlflow
+    ports:
+      - "5000:5000"   # eval: MLFLOW_TRACKING_URI=http://localhost:5000 python -m eval.run
+    healthcheck:
+      <<: *py-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=4)"]
 
 volumes:
   hf-cache:
+  chroma-data:
+  mlflow-data:

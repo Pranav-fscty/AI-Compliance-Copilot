@@ -1,13 +1,19 @@
 import logging
+import re
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from src import logs
 from src.config import CFG
-from src.rag_chain import ask, compare_laws, explain_simple, get_db, get_llm
+from src.rag_chain import ask, compare_laws, explain_simple, get_db, get_llm, retrieve
+
+logs.setup()
 
 # Configure logging for the api module
 logger: logging.Logger = logging.getLogger("compliance-copilot.api")
@@ -68,12 +74,35 @@ async def lifespan(app: FastAPI):
 # FastAPI App Initialization
 # ---------------------------------------------------------------------------
 
+DEBUG: bool = bool(CFG["debug_endpoints"])
+# Black-box by default: no /docs or /openapi.json, so the pipeline is only observable through /ask and /health.
 app: FastAPI = FastAPI(
     title="AI Compliance Copilot",
     description="RAG-based assistant for Indian regulatory law",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
+    **({} if DEBUG else {"docs_url": None, "redoc_url": None, "openapi_url": None}),
 )
+_RID_OK = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Request id (client's X-Request-ID if sane, else a new one) on every log line and the response."""
+    rid = request.headers.get("x-request-id", "")
+    rid = rid if _RID_OK.match(rid) else uuid.uuid4().hex[:16]
+    token = logs.request_id.set(rid)
+    t0 = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        logger.info("request", extra={"method": request.method, "path": request.url.path, "status": status_code,
+                                      "duration_ms": round((time.perf_counter() - t0) * 1000, 1)})
+        logs.request_id.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -171,3 +200,15 @@ def handle_health() -> JSONResponse:
         checks["llm"] = "error"
     ok = all(v == "ok" for v in checks.values())
     return JSONResponse({"status": "ok" if ok else "degraded", **checks}, status_code=200 if ok else 503)
+
+
+# ---------------------------------------------------------------------------
+# Debug endpoints: registered only when debug_endpoints is true (off by default). They expose
+# retrieval internals, so a black-box evaluation of this service must run with them off.
+# ---------------------------------------------------------------------------
+
+if DEBUG:
+    @app.post("/debug/retrieve")
+    def handle_debug_retrieve(request: AskRequest) -> dict:
+        docs = retrieve(request.question, request.law_type)
+        return {"chunks": [{"metadata": d.metadata, "text": d.page_content} for d in docs]}
