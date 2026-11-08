@@ -64,7 +64,8 @@ def main() -> None:
             if only and llm not in only:
                 continue
             print(f"== {llm}: full eval", flush=True)
-            rows[llm] = metrics(run(["eval.run", "--run-name", f"bench_llm_{llm}"], {**base, "LLM_MODEL": llm}))
+            run_name = f"bench_llm_{llm.replace(':', '-')}"  # ':' in a Windows filename = NTFS alternate data stream
+            rows[llm] = metrics(run(["eval.run", "--run-name", run_name], {**base, "LLM_MODEL": llm}))
             print(json.dumps({llm: rows[llm]}), flush=True)
     out = ROOT / "eval" / f"bench_{what}.json"
     prev = json.loads(out.read_text()) if out.exists() else {}
