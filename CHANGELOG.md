@@ -4,6 +4,29 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: default switched to bge-small-en-v1.5 (512-token chunks)
+
+Before/after on the same frozen set (`gold_v2`), same judge (qwen3.5:4b), same LLM (llama3.1), no domain filter.
+"Before" = the Phase 2 answers re-judged on gold_v2 (MLflow `default_goldv2`); "after" = MLflow `bench_llm_llama3.1`.
+
+| | before: MiniLM-L6 (256) | after: bge-small-en-v1.5 (512) |
+|---|---|---|
+| hit@1 / hit@5 / hit@8 | 0.547 / 0.750 / 0.813 | 0.672 / 0.813 / 0.828 |
+| MRR@10 | 0.651 | 0.732 |
+| multi-section full coverage@5 | 0.286 | 0.429 |
+| correctness (1–5) | 3.22 | 3.34 |
+| correct rate (≥4) | 0.484 | 0.500 |
+| faithfulness | 0.750 | 0.813 |
+| refusal accuracy (ooc) | 1.0 | 1.0 |
+| false refusal rate | 0.188 | 0.125 |
+| /ask p50 / p95 | 2.1 s / 8.8 s | 3.8 s / 9.7 s |
+| prompt tokens p50 / max | 740 / 1402 | 1611 / 3157 |
+
+- Each answer-quality gap is small (1–4 questions out of 64), but all move in the same direction and none regresses. The retrieval gain is larger (hit@1 +8 questions).
+- Cost: about 1.7 s slower at p50, because 512-token chunks make prompts about 2x longer. Still well inside `num_ctx` 8192.
+- Re-judging the same Phase 2 answers on gold_v2 moved faithfulness from 0.734 to 0.750 (one item), which is roughly the judge's noise floor from the 4 changed gold quotes.
+- The old pipeline is preserved as preset `minilm`; `bge_small` preset removed (now the default).
+
 ## Post-release: gold set re-check (gold_v2)
 
 The user asked me to check the gold items myself instead of verifying them by hand. **This is a self-check by the same model that drafted them, not a human review**; items carry `"checked": "claude-recheck-2026-11-08"` and `author` stays `claude-draft`.
@@ -33,7 +56,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 **Not done / not verified (read before relying on this release)**
 1. **Gold set not human-verified:** 0 of 74 items checked by a person (a self-check by the drafting model was done after release; see above).
 2. **LLM benchmark not run:** killed for low memory after 9/74 generations. No qwen3:8b / qwen3.5:4b comparison exists.
-3. **Default config not changed:** bge-small (512) is the best retriever but has no end-to-end answer eval, so it ships as preset `bge_small`.
+3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
 4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.
 5. `small_llm` and `nomic` presets have no answer eval.
 6. Income Tax coverage is still only Chapters I–III. `data/raw/` is not in git.

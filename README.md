@@ -46,18 +46,18 @@ Frozen eval set `eval/gold_v2.jsonl` (v1 with 4 ambiguous quotes fixed; same num
 from `data/raw`, so it works for any chunking. Judge = qwen3.5:4b (different model family from the generator), temperature 0.
 Retrieval numbers are without a domain filter.
 
-| | as shipped (v1) | `default` preset (v2) |
-|---|---|---|
-| hit@1 / hit@5 / hit@8 | 0.594 / 0.734 / 0.766 | 0.547 / 0.750 / 0.813 |
-| MRR@10 | 0.653 | 0.651 |
-| Answer correctness (judge, 1–5) | 2.75 | 3.22 |
-| Faithful to retrieved context | 61% | 73% |
-| Refuses out-of-corpus questions | 10/10 | 10/10 |
-| Wrongly refuses in-corpus questions | 20% | 19% |
-| `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s |
+| | as shipped (v1) | Phase 2 fixes (`minilm` preset) | **`default` (bge-small, 512)** |
+|---|---|---|---|
+| hit@1 / hit@5 / hit@8 | 0.594 / 0.734 / 0.766 | 0.547 / 0.750 / 0.813 | 0.672 / 0.813 / 0.828 |
+| MRR@10 | 0.653 | 0.651 | 0.732 |
+| Answer correctness (judge, 1–5) | 2.75 | 3.22 | 3.34 |
+| Faithful to retrieved context | 61% | 75% | 81% |
+| Refuses out-of-corpus questions | 10/10 | 10/10 | 10/10 |
+| Wrongly refuses in-corpus questions | 20% | 19% | 12.5% |
+| `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s | 3.8 s / 9.7 s |
 
-Embedder benchmark: `bge-small-en-v1.5` with 512-token chunks raises MRR@10 to 0.732 and hit@1 to 0.672, but it has not
-had an end-to-end answer eval yet, so it is the `bge_small` preset, not the default.
+As-shipped numbers are on gold v1; the other two columns are on gold v2 (identical retrieval numbers on v1 and v2). Every
+step changes several things at once; see the CHANGELOG for what changed between columns.
 
 Caveats: 64 in-corpus questions, so one question = 1.6 points. All 74 gold items were drafted by an LLM and
 re-checked against the source by the same LLM, but **not** human-verified. The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
@@ -127,15 +127,15 @@ or `RAG_*` variable raises an error instead of being ignored.
 
 | `RAG_PRESET` | Embedder (chunk tokens) | top_k | LLM | Eval status |
 |---|---|---|---|---|
-| `default` | all-MiniLM-L6-v2, HF (256) | 8 | llama3.1 8B | full |
-| `bge_small` | bge-small-en-v1.5, HF (512) | 8 | llama3.1 8B | retrieval only (best retriever) |
+| `default` | bge-small-en-v1.5, HF (512) | 8 | llama3.1 8B | full |
+| `minilm` | all-MiniLM-L6-v2, HF (256) | 8 | llama3.1 8B | full (the Phase 2 pipeline) |
 | `nomic` | nomic-embed-text, Ollama (500) | 5 | llama3.1 8B | retrieval only |
-| `small_llm` | all-MiniLM-L6-v2, HF (256) | 4 | qwen3.5:4b | none |
+| `small_llm` | bge-small-en-v1.5, HF (512) | 4 | qwen3.5:4b | see CHANGELOG (judge = same model) |
 
 Each preset uses its own Chroma collection, so all of them can be indexed side by side:
 
 ```powershell
-$env:RAG_PRESET = "bge_small"; python -m src.chunk; python -m src.embed_store; uvicorn src.api:app --port 8000
+$env:RAG_PRESET = "minilm"; python -m src.chunk; python -m src.embed_store; uvicorn src.api:app --port 8000
 ```
 
 ## Ground truth for RAG X-Ray
@@ -170,7 +170,7 @@ The API never reads it. `ground_truth/` is gitignored and not in the Docker imag
 ```powershell
 python -m eval.run --retrieval-only                  # ~1 min: hit@1/3/5/8, MRR@10, multi-section coverage
 python -m eval.run --run-name my_run                 # + generation and judge (needs llama3.1 and qwen3.5:4b in Ollama)
-$env:RAG_PRESET = "bge_small"; python -m eval.run --run-name bge_small
+$env:RAG_PRESET = "minilm"; python -m eval.run --run-name minilm
 python -m eval.bench embedders                       # rebuild + retrieval-eval each embedder candidate
 python -m eval.bench llms                            # full eval per LLM (needs ~16 GB RAM free; resumable)
 mlflow ui --backend-store-uri ./mlruns               # or MLFLOW_TRACKING_URI=http://localhost:5000 with compose
@@ -186,7 +186,7 @@ command again. `--fresh` starts over. Every run logs the full resolved config, g
 
 ```
 config.yaml            all pipeline settings
-presets/               default, bge_small, nomic, small_llm overlays
+presets/               default, minilm, nomic, small_llm overlays
 src/
   ingest.py            data/raw -> data/processed/{domain}.json
   chunk.py             heading split + token cap with the embedder's tokenizer

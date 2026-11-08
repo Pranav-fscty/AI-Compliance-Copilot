@@ -1,0 +1,8 @@
+# minilm: the Phase 2 pipeline. all-MiniLM-L6-v2 (256-token chunks) + llama3.1 8B, top_k 8.
+# Was the default until the Phase 3 eval; kept for comparison and as a distinct fingerprint for RAG X-Ray.
+# Eval status: full (MLflow run default_goldv2 on gold_v2; phase2_fixed on gold_v1).
+embedding_model: sentence-transformers/all-MiniLM-L6-v2
+embed_query_prefix: ""
+chunk_size: 256
+chunk_overlap: 32
+collection: compliance_minilm_c256
