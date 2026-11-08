@@ -1,26 +1,18 @@
-# Base image
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ANONYMIZED_TELEMETRY=False
 
-# Working directory
 WORKDIR /app
 
-# Copy requirements.txt first (layer caching)
-COPY requirements.txt .
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source code and evaluation files
+COPY config.yaml .
 COPY src/ ./src/
-COPY eval/ ./eval/
-COPY chroma_db/ ./chroma_db/
+# chroma_db/ is mounted at runtime (see docker-compose.yml), not baked in: it is gitignored,
+# so COPY failed on a clean clone, and a mounted index can be swapped or corrupted from outside.
 
-# Expose port
 EXPOSE 8000
-
-# Run uvicorn server
 CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

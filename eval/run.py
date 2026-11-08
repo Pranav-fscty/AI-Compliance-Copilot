@@ -82,14 +82,14 @@ def pct(xs: list[float], p: float) -> float:
     return xs[min(len(xs) - 1, round(p * (len(xs) - 1)))] if xs else float("nan")
 
 
-def retrieval_metrics(items, db, mode: str) -> tuple[dict, dict]:
+def retrieval_metrics(items, rc, mode: str) -> tuple[dict, dict]:
     per, lat = {}, []
     for it in items:
         if it["category"] == "ooc":
             continue
-        flt = {"law_type": it["law_type"]} if mode == "oracle" and it["law_type"] else None
+        law = it["law_type"] if mode == "oracle" else None
         t0 = time.perf_counter()
-        docs = db.similarity_search(it["question"], k=RANK_K, filter=flt)
+        docs = rc.retrieve(it["question"], law, k=RANK_K)  # the app's own retrieval path
         lat.append((time.perf_counter() - t0) * 1000)
         dn = [norm(d.page_content) for d in docs]
         ranks = [next((r for r, d in enumerate(dn, 1) if quote_hit(g["_n"], d)), None) for g in it["gold"]]
@@ -171,25 +171,22 @@ def main() -> None:
     ap.add_argument("--fresh", action="store_true", help="discard the checkpoint for this run name")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows cp1252 console crashed on '₹' in judge output
 
     items = load_gold()
-    hashes = {"gold_sha": sha(GOLD), "chroma_sqlite_sha": sha(ROOT / "chroma_db" / "chroma.sqlite3")}  # hash before opening the DB
-    for d in ("income_tax", "gst", "rbi"):
-        hashes[f"chunks_{d}_sha"] = sha(ROOT / "data" / "processed" / f"{d}_chunks.json")
-
-    os.chdir(ROOT)  # app resolves ./chroma_db relative to CWD
     sys.path.insert(0, str(ROOT))
+    from src.config import CFG, path
+    hashes = {"gold_sha": sha(GOLD), "chroma_sqlite_sha": sha(path("chroma_dir") / "chroma.sqlite3")}  # before opening the DB
+    for d in CFG["domains"]:
+        hashes[f"chunks_{d}_sha"] = sha(path("processed_dir") / f"{d}_chunks.json")
     import src.rag_chain as rc
-    from src.embed_store import EMBEDDING_MODEL_NAME
 
-    db = rc.get_db()
-    client = ollama.Client(host=os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+    rc.get_db()
+    client = ollama.Client(host=CFG["ollama_base_url"])
     params = {
-        "embedding_model": EMBEDDING_MODEL_NAME, "chunking": "split_on_##_no_size_limit",
-        "distance": "l2 (chroma default, unset)", "reranker": "none", "retrieval_k": rc.RETRIEVAL_K,
-        "llm_model": rc.LLM_MODEL, "llm_digest": model_digest(client, rc.LLM_MODEL),
-        "llm_temperature": rc.LLM_TEMPERATURE, "num_ctx_configured": "unset",
-        "prompt_sha": hashlib.sha256(rc.STRICT_PROMPT.template.encode()).hexdigest()[:16],
+        **{k: v for k, v in CFG.items() if k != "prompt_template"},
+        "prompt_sha": hashlib.sha256(CFG["prompt_template"].encode()).hexdigest()[:16],
+        "llm_digest": model_digest(client, CFG["llm_model"]),
         "judge_model": JUDGE_MODEL, "judge_digest": model_digest(client, JUDGE_MODEL),
         "n_items": len(items), "n_ooc": sum(i["category"] == "ooc" for i in items),
         "gold_authors": json.dumps(sorted({i["author"] for i in items})), **hashes,
@@ -197,7 +194,7 @@ def main() -> None:
 
     metrics, per_item = {}, {i["id"]: {"id": i["id"], "category": i["category"]} for i in items}
     for mode in ("none", "oracle"):
-        m, per = retrieval_metrics(items, db, mode)
+        m, per = retrieval_metrics(items, rc, mode)
         metrics.update(m)
         for k, v in per.items():
             per_item[k][f"retrieval_{mode}"] = v
@@ -221,12 +218,13 @@ def main() -> None:
 
         enc = tiktoken.get_encoding("cl100k_base")
         rc.ask("warm-up question", None)  # load model; excluded from latency
-        params["num_ctx_observed"] = loaded_ctx(client, rc.LLM_MODEL)
+        params["num_ctx_observed"] = loaded_ctx(client, CFG["llm_model"])
         for n, it in enumerate(items, 1):
             rec = done.get(("gen", it["id"]))
             if rec is None:
-                docs = [d.page_content for d in db.similarity_search(it["question"], k=rc.RETRIEVAL_K)]
-                ptok = len(enc.encode(rc.STRICT_PROMPT.format(context="\n\n".join(docs), question=it["question"])))
+                retrieved = rc.retrieve(it["question"])
+                docs = [d.page_content for d in retrieved]
+                ptok = len(enc.encode(rc.build_prompt(it["question"], retrieved)))
                 t0 = time.perf_counter()
                 res = rc.ask(it["question"], None)  # headline: no law_type hint, like a black-box client
                 rec = {"stage": "gen", "id": it["id"], "answer": res["answer"], "ask_s": round(time.perf_counter() - t0, 2),

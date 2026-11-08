@@ -1,0 +1,46 @@
+# Single source of truth for the RAG pipeline.
+# Every key can be overridden with an env var RAG_<KEY> (value parsed as YAML), e.g. RAG_TOP_K=5.
+# Relative paths are resolved from the repo root, not the current directory.
+
+# --- data ---
+raw_dir: data/raw
+processed_dir: data/processed
+domains: [income_tax, gst, rbi]
+# Mis-filed copies of Income-tax Act Ch. I-III (already covered by income_tax_act.md); see CHANGELOG.
+exclude_sources: [Circular_No__236302024_GST.md, Circular_No__237312024_GST.md]
+
+# --- chunking ---
+chunk_strategy: heading_then_tokens  # split on '## ' headings, then cap each section at chunk_size tokens
+chunk_size: 256                      # in tokens of the embedding model's own tokenizer (MiniLM window = 256)
+chunk_overlap: 32
+min_chunk_chars: 50
+
+# --- index ---
+embedding_model: sentence-transformers/all-MiniLM-L6-v2
+chroma_dir: chroma_db
+collection: compliance_minilm_c256
+distance: cosine          # Chroma hnsw:space
+hnsw_search_ef: 100       # default 10 made results change between restarts
+
+# --- retrieval ---
+top_k: 8
+compare_k: 3
+reranker: none            # only "none" is implemented
+
+# --- generation ---
+llm_model: llama3.1
+temperature: 0
+num_ctx: 8192
+ollama_base_url: http://localhost:11434   # NOT OLLAMA_HOST: that var is Ollama's server bind address
+prompt_template: |-  # identical to the original STRICT_PROMPT
+  You are a legal compliance assistant for Indian law.
+  Answer the question using ONLY the context provided below.
+  If the answer is not in the context, say "This information is not available in the indexed documents."
+  Do NOT use any outside knowledge or training data.
+
+  Context:
+  {context}
+
+  Question: {question}
+
+  Answer:

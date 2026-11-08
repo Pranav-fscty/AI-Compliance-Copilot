@@ -1,31 +1,39 @@
-"""Configuration module for the compliance-copilot application.
+"""Pipeline configuration: config.yaml, with RAG_<KEY> environment overrides."""
 
-Loads environment variables, validates mandatory configurations, and sets up
-the global application logger.
-"""
-
-import os
 import logging
+import os
+from pathlib import Path
+
+import yaml
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+ROOT: Path = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
 
-# Retrieve values with defaults or raise validation errors
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is missing or empty. Please set it in your .env file.")
 
-CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
-LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+def load_config(path: str | Path | None = None) -> dict:
+    """Load config.yaml and apply RAG_<KEY> env overrides (values parsed as YAML)."""
+    cfg_path = Path(path or os.getenv("RAG_CONFIG", ROOT / "config.yaml"))
+    cfg: dict = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    unknown = [k for k in os.environ if k.startswith("RAG_") and k != "RAG_CONFIG" and k[4:].lower() not in cfg]
+    if unknown:  # a typo'd override would otherwise be silently ignored
+        raise ValueError(f"Unknown config override(s): {unknown}. Valid keys: {sorted(cfg)}")
+    for key in cfg:
+        env = os.getenv(f"RAG_{key.upper()}")
+        if env is not None:
+            cfg[key] = yaml.safe_load(env)
+    return cfg
 
-# Parse logging level
-_numeric_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
 
-# Setup module-level logger
+def path(key: str) -> Path:
+    """Resolve a path-valued config key against the repo root (absolute values pass through)."""
+    return ROOT / CFG[key]
+
+
+CFG: dict = load_config()
+
 logging.basicConfig(
-    level=_numeric_level,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger: logging.Logger = logging.getLogger("compliance-copilot")
-logger.info("Configuration successfully loaded and logger initialized.")

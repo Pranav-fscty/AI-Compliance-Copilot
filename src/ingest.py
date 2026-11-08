@@ -26,56 +26,13 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from src.config import CFG, path
 
-# ---------------------------------------------------------------------------
-# Module-level logger (independent of src.config so we never trigger the
-# OPENAI_API_KEY validation just by running the ingestion pipeline).
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger: logging.Logger = logging.getLogger("compliance-copilot.ingest")
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-MIN_CONTENT_LENGTH: int = 100          # skip files shorter than this after cleaning
+MIN_CONTENT_LENGTH: int = 100  # skip files shorter than this after cleaning
 ENCODING: str = "utf-8"
-
-# Supported law domains
-DOMAINS: tuple[str, ...] = ("income_tax", "gst", "rbi")
-
-# Directory layout (resolved relative to this file's parent package root)
-_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
-RAW_BASE_DIR: str = str(_PROJECT_ROOT / "data" / "raw")
-PROCESSED_BASE_DIR: str = str(_PROJECT_ROOT / "data" / "processed")
-
-# Markdown file extension
 MD_EXTENSION: str = ".md"
-
-# Repeated-line threshold: lines appearing more than this many times are
-# treated as headers/footers and removed.
-REPEATED_LINE_MAX_COUNT: int = 3
-
-# Minimum line length below which repetition-check is applied
-REPEATED_LINE_LENGTH_THRESHOLD: int = 40
-
-# Number of consecutive blank lines to collapse into one
-BLANK_LINE_COLLAPSE_THRESHOLD: int = 3
-
-# Line-ending punctuation / markers that indicate a line is "complete"
-# (i.e. should *not* be joined with the next line).
-_COMPLETE_LINE_PATTERN: re.Pattern[str] = re.compile(
-    r"(?:\.\s*$|:\s*$|#\s)"
-)
-
-# Lines consisting solely of digits (page-number artifacts)
-_PAGE_NUMBER_PATTERN: re.Pattern[str] = re.compile(r"^\d+\s*$")
-
-# Three-or-more consecutive blank lines
-_EXCESS_BLANK_LINES_PATTERN: re.Pattern[str] = re.compile(r"\n{3,}")
 
 
 # ---------------------------------------------------------------------------
@@ -85,14 +42,17 @@ _EXCESS_BLANK_LINES_PATTERN: re.Pattern[str] = re.compile(r"\n{3,}")
 def clean_text(text: str) -> str:
     # Only join lines that are clearly mid-sentence
     # NEVER join lines that start with # (Markdown headings)
-    text = re.sub(r'(?<![.\n#])\n(?![\n#])', ' ', text)
+    # The (?m)^(?!#) guard stops a heading line from swallowing the body line after it.
+    text = re.sub(r'(?m)^(?!#)(.*[^.\n#])\n(?![\n#])', r'\1 ', text)
     # Remove standalone page numbers
     text = re.sub(r'\n\s*\d{1,3}\s*\n', '\n', text)
-    # Remove repeated short lines
+    # Remove repeated short lines (page headers/footers), but keep numbered headings like "## 1." that
+    # legitimately repeat across annexes; dropping them merged whole sections together.
     lines = text.split('\n')
     from collections import Counter
     counts = Counter(l.strip() for l in lines if len(l.strip()) < 40)
-    lines = [l for l in lines if counts.get(l.strip(), 0) <= 3 or len(l.strip()) >= 40]
+    lines = [l for l in lines if counts.get(l.strip(), 0) <= 3 or len(l.strip()) >= 40
+             or re.match(r'#+ (Para )?\d', l)]
     text = '\n'.join(lines)
     # Normalize blank lines
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -160,7 +120,7 @@ def ingest_domain(domain: str, raw_dir: str, output_dir: str) -> list[dict]:
     output_path = Path(output_dir)
 
     # Collect candidate files
-    md_files: list[Path] = sorted(raw_path.glob(f"*{MD_EXTENSION}"))
+    md_files: list[Path] = sorted(p for p in raw_path.glob(f"*{MD_EXTENSION}") if p.name not in CFG["exclude_sources"])
     total_attempted: int = len(md_files)
 
     logger.info(
@@ -232,7 +192,7 @@ def ingest_domain(domain: str, raw_dir: str, output_dir: str) -> list[dict]:
 def main() -> None:
     """Run the ingestion pipeline for all three law domains.
 
-    Iterates over :data:`DOMAINS`, calls :func:`ingest_domain` for each,
+    Iterates over ``CFG['domains']``, calls :func:`ingest_domain` for each,
     then prints a formatted summary table to *stdout*::
 
         domain        | files_found | files_ingested | total_chars
@@ -243,12 +203,12 @@ def main() -> None:
     """
     summary_rows: list[dict] = []
 
-    for domain in DOMAINS:
-        raw_dir: str = os.path.join(RAW_BASE_DIR, domain)
+    for domain in CFG["domains"]:
+        raw_dir: str = str(path("raw_dir") / domain)
         records: list[dict] = ingest_domain(
             domain=domain,
             raw_dir=raw_dir,
-            output_dir=PROCESSED_BASE_DIR,
+            output_dir=str(path("processed_dir")),
         )
 
         # Count .md files found (re-check so summary is accurate even if

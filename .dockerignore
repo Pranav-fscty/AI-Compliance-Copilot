@@ -7,3 +7,7 @@ venv/
 data/raw/
 .mlruns/
 .git/
+chroma_db/
+mlruns/
+eval/checkpoints/
+data/processed/

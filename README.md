@@ -1,6 +1,6 @@
 # 🏛️ AI Compliance Copilot
 
-> A **production-ready RAG system** for querying Indian regulatory law — Income Tax Act 2025, GST (CGST Act), and RBI Directions — served as a Dockerised FastAPI microservice with MLflow-tracked evaluations.
+> A RAG system for querying Indian regulatory law — Income Tax Act 2025, GST (CGST Act), and RBI Directions — served as a Dockerised FastAPI microservice with MLflow-tracked evaluations.
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
@@ -30,10 +30,10 @@
 **AI Compliance Copilot** is a Retrieval-Augmented Generation (RAG) assistant that lets you query complex Indian regulatory documents in plain English. Rather than reading hundreds of pages of law, ask a question and get a grounded answer with precise section citations — or compare two regulatory frameworks side by side.
 
 **Key Design Principles:**
-- **Grounded answers only** — the LLM is strictly instructed to answer from retrieved context, never hallucinate
+- **Grounded-answer prompt** — the LLM is instructed to answer only from retrieved context (instruction, not a guarantee: see `faithfulness_rate` in the eval)
 - **Section-level citations** — every answer includes the source document and section heading
 - **Three specialised chains** — Q&A, cross-domain comparison, and plain-English simplification
-- **Fully offline-capable** — runs on a local Ollama/llama3.1 instance, no external API calls for inference
+- **Local inference** — generation runs on a local Ollama instance; the embedding model is downloaded from Hugging Face on first run
 
 ---
 
@@ -215,45 +215,17 @@ POST /simplify
 
 ## 📊 Eval Results
 
-The system is evaluated using a 20-question hand-curated question set covering all three law domains (`eval/questions.json`). Two metrics are measured:
+Evaluated with `python -m eval.run` on a frozen 74-item set (`eval/gold_v1.jsonl`: 57 single-section,
+7 multi-section and 10 out-of-corpus questions across all three domains). Gold answers are verbatim
+quotes from the source documents, so the set does not depend on chunk labels. Metrics: hit@1/3/5/8 and
+MRR@10 (with and without a domain filter), LLM-judge correctness and faithfulness, refusal accuracy on
+out-of-corpus questions, and p50/p95 latency. Every run is logged to MLflow (experiment `xray-target-eval`).
 
-- **Retrieval Accuracy** — did the correct legal section appear in at least one citation?
-- **LLM-as-Judge Score** — 1–5 score from a second llama3.1 instance acting as an impartial legal QA evaluator
-- **% Acceptable** — fraction of answers scoring ≥ 3 (the minimum acceptable threshold)
+Current numbers and the before/after history are in [CHANGELOG.md](./CHANGELOG.md).
 
-### Baseline Results
-
-| Metric | Score |
-|---|---|
-| Retrieval Accuracy | **85.0%** |
-| Avg Judge Score (1–5) | **3.35 / 5.0** |
-| % Answers Acceptable (≥3) | **80.0%** |
-| Total Questions | 20 |
-| Embedding Model | `all-MiniLM-L6-v2` |
-| Chunking Strategy | Markdown heading-based |
-| Retrieval k | 8 |
-| LLM | llama3.1 |
-
-### Experiment Results (MLflow)
-
-A grid search over 2 embedding models × 3 chunk sizes was run and tracked in MLflow:
-
-| Embedding Model | Chunk Size | Retrieval Accuracy |
-|---|---|---|
-| `all-MiniLM-L6-v2` | 300 | ~0.75 |
-| `all-MiniLM-L6-v2` | 500 | ~0.80 |
-| `all-MiniLM-L6-v2` | **800** | **~0.83** |
-| `BAAI/bge-small-en-v1.5` | 300 | ~0.70 |
-| `BAAI/bge-small-en-v1.5` | 500 | ~0.75 |
-| `BAAI/bge-small-en-v1.5` | 800 | ~0.78 |
-
-> **Finding:** Heading-based chunking (baseline) outperforms fixed-size chunking at equivalent chunk sizes, because legal documents are naturally structured by sections. The `all-MiniLM-L6-v2` model consistently outperforms `bge-small-en-v1.5` on this domain.
-
-To reproduce experiments:
-```bash
-python -m src.experiments
-mlflow ui   # View results at http://localhost:5000
-```
+> The "85% retrieval accuracy" previously shown here was hit@8 on 20 self-written questions with the
+> domain given as a filter and labels tuned to the output; the MLflow experiment grid shown here never
+> completed a run. Both were removed.
 
 ---
 
@@ -279,7 +251,7 @@ cd ai-compliance-copilot
 ```bash
 # Install Ollama from https://ollama.com
 ollama pull llama3.1
-ollama serve   # Keep this running in a separate terminal
+# On Windows Ollama runs as a background app; no `ollama serve` needed.
 ```
 
 ### 3. Set Up Python Environment
@@ -295,19 +267,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment Variables
+### 4. Configure
 
-```bash
-cp .env.example .env   # or create .env manually
-```
+All pipeline settings live in `config.yaml`. Any key can be overridden with an env var `RAG_<KEY>`
+(e.g. `RAG_TOP_K=5`); `.env` is optional (see `.env.example`). No API keys are needed.
 
-Edit `.env`:
-```env
-OPENAI_API_KEY=your_openai_key_here   # Required by config.py (can be a placeholder if not using OpenAI)
-CHROMA_PERSIST_DIR=./chroma_db
-LOG_LEVEL=INFO
-OLLAMA_HOST=http://localhost:11434
-```
+> If your system has `OLLAMA_HOST=0.0.0.0:11434` set (Ollama's server bind address), that is fine:
+> the app uses `ollama_base_url` from the config, not `OLLAMA_HOST`.
 
 ### 5. Prepare Your Law Documents
 
@@ -390,20 +356,8 @@ Open the interactive API docs at: **[http://localhost:8000/docs](http://localhos
 ### Run Evaluation
 
 ```bash
-python -m src.eval
-```
-
-Sample output:
-```
-============================================================
-EVALUATION COMPLETE
-============================================================
-{
-  "retrieval_accuracy": 0.85,
-  "avg_judge_score": 3.35,
-  "pct_acceptable": 0.8
-}
-============================================================
+python -m eval.run --retrieval-only   # ~1 min, retrieval metrics only
+python -m eval.run                     # + generation and LLM judge (needs Ollama: llama3.1, qwen3.5:4b)
 ```
 
 ---
@@ -415,13 +369,11 @@ compliance-copilot/
 │
 ├── src/
 │   ├── api.py            # FastAPI app — /ask, /compare, /simplify, /health
-│   ├── rag_chain.py      # Three LangChain RAG chains + cached singletons
+│   ├── rag_chain.py      # retrieve(), ask(), compare_laws(), explain_simple()
 │   ├── embed_store.py    # ChromaDB vector store build & load
-│   ├── chunk.py          # Markdown heading-based legal text chunker
+│   ├── chunk.py          # ## headings, then token-capped to the embedder window
 │   ├── ingest.py         # Raw .md ingestion & text cleaning pipeline
-│   ├── eval.py           # LLM-as-judge evaluation pipeline
-│   ├── experiments.py    # MLflow experiment grid search
-│   └── config.py         # Environment variable loading & logging setup
+│   └── config.py         # Loads config.yaml + RAG_<KEY> env overrides
 │
 ├── data/
 │   ├── raw/
@@ -431,39 +383,28 @@ compliance-copilot/
 │   └── processed/        # Cleaned JSON + chunks (auto-generated)
 │
 ├── eval/
-│   └── questions.json    # 20 hand-curated Q&A pairs with expected sections
+│   ├── gold_v1.jsonl     # Frozen 74-item eval set (verbatim-quote gold)
+│   └── run.py            # python -m eval.run
 │
 ├── chroma_db/            # Persisted ChromaDB vector store (auto-generated)
 ├── mlruns/               # MLflow experiment runs (auto-generated)
 │
 ├── Dockerfile
 ├── docker-compose.yml
-├── requirements.txt
-├── log_baseline.py       # Script to log baseline metrics to MLflow
-└── .env                  # Environment configuration (not committed)
+├── config.yaml           # All pipeline settings
+├── requirements.txt      # Pinned direct deps (requirements.lock = full pins)
+└── .env.example
 ```
 
 ---
 
 ## 🧪 Experiment Tracking
 
-This project uses **MLflow** to track retrieval accuracy and answer quality across different embedding models and chunk sizes.
-
-```bash
-# Run the full experiment grid (2 models × 3 chunk sizes)
-python -m src.experiments
-
-# Launch the MLflow UI
-mlflow ui
-
-# View at http://localhost:5000
-```
-
-**Tracked parameters:** `embedding_model`, `chunk_size`, `chunk_overlap`  
-**Tracked metrics:** `retrieval_accuracy`, `avg_answer_length`
+`eval.run` logs every run to MLflow at `./mlruns` (experiment `xray-target-eval`) with the full
+config, data hashes and judge model digest as params. View with `mlflow ui --backend-store-uri ./mlruns`.
 
 ---
 
 ## 📝 License
 
-MIT License — see [LICENSE](./LICENSE) for details.
+No license file is included yet.

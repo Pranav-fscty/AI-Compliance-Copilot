@@ -10,51 +10,24 @@ All functions rely on a persisted Chroma vector store built by embed_store.py.
 
 from __future__ import annotations
 
-import os
 import functools
 import logging
 from typing import TypedDict
 
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
 from langchain_ollama import ChatOllama
-from langchain.chains import RetrievalQA
-from langchain.schema import HumanMessage
-from langchain.prompts import PromptTemplate
 
-from src.config import CHROMA_PERSIST_DIR
-from src.embed_store import EMBEDDING_MODEL_NAME
-
-# ---------------------------------------------------------------------------
-# Module logger
-# ---------------------------------------------------------------------------
+from src.config import CFG
+from src.embed_store import load_vectorstore
 
 logger: logging.Logger = logging.getLogger("compliance-copilot.rag_chain")
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+VALID_LAW_TYPES: frozenset[str] = frozenset(CFG["domains"])
+if CFG["reranker"] != "none":
+    raise NotImplementedError(f"reranker={CFG['reranker']!r}: only 'none' is implemented")
 
-LLM_MODEL: str = "llama3.1"
-LLM_TEMPERATURE: int = 0
-RETRIEVAL_K: int = 8
-COMPARE_K: int = 3
-VALID_LAW_TYPES: frozenset[str] = frozenset({"income_tax", "gst", "rbi"})
-
-STRICT_PROMPT = PromptTemplate(
-    input_variables=["context", "question"],
-    template="""You are a legal compliance assistant for Indian law.
-Answer the question using ONLY the context provided below.
-If the answer is not in the context, say "This information is not available in the indexed documents."
-Do NOT use any outside knowledge or training data.
-
-Context:
-{context}
-
-Question: {question}
-
-Answer:"""
-)
 
 # ---------------------------------------------------------------------------
 # TypedDicts
@@ -92,46 +65,27 @@ class AskResult(TypedDict):
 
 @functools.lru_cache(maxsize=1)
 def get_llm() -> ChatOllama:
-    """Return a cached ChatOllama instance."""
-    logger.info("Initialising ChatOllama — model=%s", LLM_MODEL)
-    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    return ChatOllama(
-        model=LLM_MODEL,
-        temperature=LLM_TEMPERATURE,
-        base_url=ollama_host,
-    )
+    """Cached ChatOllama. num_ctx is explicit: Ollama's default silently truncated long prompts."""
+    logger.info("Initialising ChatOllama model=%s num_ctx=%s", CFG["llm_model"], CFG["num_ctx"])
+    return ChatOllama(model=CFG["llm_model"], temperature=CFG["temperature"], num_ctx=CFG["num_ctx"],
+                      base_url=CFG["ollama_base_url"])
 
 
 @functools.lru_cache(maxsize=1)
 def get_db() -> Chroma:
-    """Returns a cached Chroma vector store loaded from the persisted directory.
+    """Cached handle on the configured Chroma collection."""
+    return load_vectorstore()
 
-    Loads the embeddings model (same ``EMBEDDING_MODEL_NAME`` used in
-    ``embed_store.py``) and opens the existing Chroma collection without
-    rebuilding or re-embedding anything.
 
-    Returns:
-        Chroma: A ready-to-use, cached vector store instance.
+def retrieve(question: str, law_type: str | None = None, k: int | None = None) -> list[Document]:
+    """Top-k chunks for a question, optionally filtered to one law domain."""
+    filt = {"law_type": law_type} if law_type else None
+    return get_db().similarity_search(question, k=k or CFG["top_k"], filter=filt)
 
-    Raises:
-        FileNotFoundError: If ``CHROMA_PERSIST_DIR`` does not exist on disk.
-    """
-    import os
 
-    if not os.path.exists(CHROMA_PERSIST_DIR):
-        raise FileNotFoundError(
-            f"Chroma persist directory not found at: {CHROMA_PERSIST_DIR}. "
-            "Run `python -m src.embed_store` first to build the vector store."
-        )
-
-    logger.info(
-        "Loading persisted Chroma vector store from: %s", CHROMA_PERSIST_DIR
-    )
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME)
-    return Chroma(
-        persist_directory=CHROMA_PERSIST_DIR,
-        embedding_function=embeddings,
-    )
+def build_prompt(question: str, docs: list[Document]) -> str:
+    """Same 'stuff' layout RetrievalQA used: chunks joined by blank lines."""
+    return CFG["prompt_template"].format(context="\n\n".join(d.page_content for d in docs), question=question)
 
 
 # ---------------------------------------------------------------------------
@@ -156,22 +110,6 @@ def _validate_law_type(law_type: str | None, *, param_name: str = "law_type") ->
         )
 
 
-def _build_search_kwargs(law_type: str | None, k: int) -> dict:
-    """Constructs the ``search_kwargs`` dict for a Chroma retriever.
-
-    Args:
-        law_type: Optional metadata filter value for the ``law_type`` field.
-        k: The maximum number of documents to retrieve.
-
-    Returns:
-        dict: A kwargs dict suitable for ``vectorstore.as_retriever()``.
-    """
-    kwargs: dict = {"k": k}
-    if law_type is not None:
-        kwargs["filter"] = {"law_type": law_type}
-    return kwargs
-
-
 def _extract_citations(source_documents: list) -> list[Citation]:
     """Extracts citation metadata from a list of LangChain Document objects.
 
@@ -180,7 +118,7 @@ def _extract_citations(source_documents: list) -> list[Citation]:
 
     Args:
         source_documents: A list of ``langchain_core.documents.Document``
-            objects returned by a RetrievalQA chain.
+            objects that were placed in the prompt.
 
     Returns:
         list[Citation]: Deduplicated citations ordered by first occurrence.
@@ -208,9 +146,9 @@ def _extract_citations(source_documents: list) -> list[Citation]:
 def ask(question: str, law_type: str | None = None) -> AskResult:
     """Answers a legal compliance question using retrieval-augmented generation.
 
-    Retrieves the top ``RETRIEVAL_K`` chunks from the Chroma vector store,
-    optionally filtered to a single law domain, then uses a LangChain
-    ``RetrievalQA`` chain to generate a grounded answer.
+    Retrieves the top ``CFG['top_k']`` chunks, optionally filtered to a single
+    law domain, stuffs them into ``CFG['prompt_template']`` and asks the LLM.
+    Citations are exactly the chunks that were put in the prompt.
 
     Args:
         question: The natural-language compliance question to answer.
@@ -233,25 +171,8 @@ def ask(question: str, law_type: str | None = None) -> AskResult:
         "ask() called — question=%r  law_type=%s", question[:80], law_type
     )
 
-    db: Chroma = get_db()
-    llm: ChatOllama = get_llm()
-
-    search_kwargs = _build_search_kwargs(law_type, RETRIEVAL_K)
-    retriever = db.as_retriever(search_kwargs=search_kwargs)
-
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": STRICT_PROMPT},
-    )
-
-    logger.debug("Running RetrievalQA chain...")
-    result: dict = qa_chain.invoke({"query": question})
-
-    answer: str = result.get("result", "")
-    source_docs: list = result.get("source_documents", [])
+    source_docs = retrieve(question, law_type)
+    answer: str = get_llm().invoke([HumanMessage(content=build_prompt(question, source_docs))]).content
     citations: list[Citation] = _extract_citations(source_docs)
 
     logger.info(
@@ -265,7 +186,7 @@ def ask(question: str, law_type: str | None = None) -> AskResult:
 def compare_laws(question: str, law_type_a: str, law_type_b: str) -> str:
     """Compares two law domains on a given topic using retrieved context.
 
-    Independently retrieves ``COMPARE_K`` documents from each of the two
+    Independently retrieves ``CFG["compare_k"]`` documents from each of the two
     specified law domains, then asks the LLM to produce a structured
     comparison using *only* the provided context — avoiding hallucination.
 
@@ -298,7 +219,7 @@ def compare_laws(question: str, law_type_a: str, law_type_b: str) -> str:
     def _retrieve(law_type: str) -> list:
         results = db.similarity_search(
             question,
-            k=COMPARE_K,
+            k=CFG["compare_k"],
             filter={"law_type": law_type},
         )
         logger.debug("Retrieved %d docs for domain '%s'", len(results), law_type)
