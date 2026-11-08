@@ -4,6 +4,26 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## v2.0-xray-target (2026-11-08)
+
+Summary of the refinement (Phases 0–5). Detail per phase below.
+
+**What changed, in one line each**
+- The eval is real now: frozen 74-item verbatim-quote gold set, no domain hint in the headline, a judge from a different model family, all runs in MLflow. The old 85% and the experiment table are gone.
+- The pipeline is fixed: chunks fit the embedder, the LLM context fits the prompt, mislabeled files are excluded, ingest no longer corrupts headings, retrieval is deterministic.
+- Everything is configurable (`config.yaml` < preset < `RAG_*`) and separately deployable (api / chroma / ollama / mlflow).
+- Ground truth for RAG X-Ray: `python -m src.manifest`; the API is black-box by default.
+
+**Not done / not verified (read before relying on this release)**
+1. **Gold set not human-verified:** 0 of 74 items checked by a person. Every number depends on LLM-drafted gold.
+2. **LLM benchmark not run:** killed for low memory after 9/74 generations. No qwen3:8b / qwen3.5:4b comparison exists.
+3. **Default config not changed:** bge-small (512) is the best retriever but has no end-to-end answer eval, so it ships as preset `bge_small`.
+4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.
+5. `small_llm` and `nomic` presets have no answer eval.
+6. Income Tax coverage is still only Chapters I–III. `data/raw/` is not in git.
+7. `/compare` and `/simplify` prompts are in code and have no eval. `reranker` accepts only `none`.
+8. `docs/architecture.png` shows the old single-container design and is no longer referenced by the README.
+
 ## Phase 4: separate services, presets, ground truth, black-box API
 
 - **docker-compose with 4 services:** `api`, `chroma` (server mode, `chromadb/chroma:0.5.3` = client pin), `ollama`, `mlflow` (v2.16.0 = client pin), each with a healthcheck; `api` waits for healthy `chroma` and `ollama`. Ollama reuses the host's models folder; `docker-compose.gpu.yml` adds the NVIDIA GPU.
@@ -116,10 +136,10 @@ Caveats:
 - Some of the junk in section headings comes from the PDF→Markdown conversion in `data/raw` itself, not only from the ingest bugs.
 - Chroma's "Failed to send telemetry event" log line is a posthog version mismatch. With `anonymized_telemetry=False` the client is disabled and nothing is sent.
 
-### Still open (not fixed)
+### Still open after Phase 2 (see v2.0 summary for the current list)
 - `/compare` and `/simplify` prompts still live in code, not config.
 - Citation headings are only partly cleaned (cosmetic).
 - Income Tax coverage is still only Chapters I–III of the Act.
 - Gold set human verification: 0 of 74 items done.
 - `reranker` is a config key, but the only allowed value is `none`.
-- Still on the deprecated `langchain_community` Chroma/HF wrappers.
+- Still on the deprecated `langchain_community` Chroma wrapper (the HF embeddings wrapper was replaced in Phase 3).

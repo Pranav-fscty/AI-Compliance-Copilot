@@ -1,410 +1,217 @@
-# 🏛️ AI Compliance Copilot
+# AI Compliance Copilot
 
-> A RAG system for querying Indian regulatory law — Income Tax Act 2025, GST (CGST Act), and RBI Directions — served as a Dockerised FastAPI microservice with MLflow-tracked evaluations.
+A local RAG assistant for Indian regulatory text: the **CGST Act + 5 GST circulars**, **6 RBI NBFC Master Directions**,
+and **Chapters I–III of the Income-tax Act, 2025**. FastAPI + Chroma + Ollama, with a frozen eval set and MLflow tracking.
 
-[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![LangChain](https://img.shields.io/badge/LangChain-0.2.16-1C3C3C?logo=langchain)](https://langchain.com)
-[![ChromaDB](https://img.shields.io/badge/ChromaDB-0.5.3-FF6B35)](https://trychroma.com)
-[![MLflow](https://img.shields.io/badge/MLflow-2.16-0194E2?logo=mlflow)](https://mlflow.org)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](https://docker.com)
-[![Ollama](https://img.shields.io/badge/LLM-llama3.1-000?logo=meta)](https://ollama.com)
+It is also built to be a **test target for RAG X-Ray**, a tool that infers a RAG pipeline from outside and confirms
+its guesses with fault injection. So every pipeline setting is in one config, the services run separately, the API is
+black-box by default, and the true pipeline is written to a ground-truth manifest the API never serves.
 
----
-
-## 📋 Table of Contents
-
-- [Overview](#-overview)
-- [Architecture](#-architecture)
-- [Features](#-features)
-- [Eval Results](#-eval-results)
-- [Setup Instructions](#-setup-instructions)
-- [API Reference](#-api-reference)
-- [Project Structure](#-project-structure)
-- [Experiment Tracking](#-experiment-tracking)
+- Python 3.11 · LangChain 0.2 (Chroma wrapper only) · chromadb 0.5.3 · sentence-transformers 3.0.1 · Ollama · FastAPI · MLflow 2.16
+- Runs fully locally once the models are downloaded; no API keys.
 
 ---
 
-## 🔍 Overview
+## Architecture
 
-**AI Compliance Copilot** is a Retrieval-Augmented Generation (RAG) assistant that lets you query complex Indian regulatory documents in plain English. Rather than reading hundreds of pages of law, ask a question and get a grounded answer with precise section citations — or compare two regulatory frameworks side by side.
+```mermaid
+flowchart LR
+    subgraph offline["Index build (CLI)"]
+        RAW["data/raw/{gst,rbi,income_tax}/*.md"] -->|src.ingest<br/>clean text| PROC["data/processed/{domain}.json"]
+        PROC -->|src.chunk<br/>split on headings, then cap at N embedder tokens| CH["data/processed/chunks/&lt;collection&gt;/"]
+        CH -->|src.embed_store| EMB["embedder<br/>(sentence-transformers or Ollama)"]
+    end
+    EMB --> CHROMA[("chroma<br/>collection per preset<br/>cosine · HNSW")]
 
-**Key Design Principles:**
-- **Grounded-answer prompt** — the LLM is instructed to answer only from retrieved context (instruction, not a guarantee: see `faithfulness_rate` in the eval)
-- **Section-level citations** — every answer includes the source document and section heading
-- **Three specialised chains** — Q&A, cross-domain comparison, and plain-English simplification
-- **Local inference** — generation runs on a local Ollama instance; the embedding model is downloaded from Hugging Face on first run
+    CLIENT["client / RAG X-Ray"] -->|POST /ask · GET /health| API["api (FastAPI)"]
+    API -->|embed query| EMB2["embedder"]
+    API -->|top_k similarity search| CHROMA
+    API -->|prompt + chunks| OLLAMA["ollama<br/>llama3.1 8B"]
+
+    EVAL["eval.run<br/>frozen gold set"] -->|imports rag_chain directly, not HTTP| RC["rag_chain.ask()"]
+    EVAL -->|params + metrics| MLFLOW[("mlflow")]
+    CFG["config.yaml, then presets/RAG_PRESET.yaml, then RAG_* env"] -.-> API
+    CFG -.->|src.manifest| GT["ground_truth/pipeline_manifest.json<br/>(never served)"]
+```
+
+**Request path (`/ask`):** embed question, retrieve `top_k` chunks (optionally filtered by `law_type`), put them in the prompt in
+rank order, one Ollama call (`temperature 0`, `num_ctx 8192`), return the answer plus the `(source, section)` of every chunk in the
+prompt. If the model answers with the refusal sentence, citations are empty. No reranker, no hybrid search, no query rewriting.
 
 ---
 
-## 🏗️ Architecture
+## Results
 
-![AI Compliance Copilot Architecture](./docs/architecture.png)
+Frozen eval set `eval/gold_v1.jsonl`: 74 questions (57 single-section, 7 multi-section, 10 not in the corpus). Gold = verbatim quotes
+from `data/raw`, so it works for any chunking. Judge = qwen3.5:4b (different model family from the generator), temperature 0.
+Retrieval numbers are without a domain filter.
 
-```
-┌──────────────────────────┐    ┌──────────────────────────┐    ┌─────────────────────────┐
-│      DATA PIPELINE       │    │     INFERENCE LAYER       │    │      API & EVAL         │
-│                          │    │                           │    │                         │
-│  Income Tax / GST / RBI  │    │   User Query              │    │  FastAPI (port 8000)    │
-│  Raw Markdown (.md)      │    │       │                   │    │  ┌─────────────────┐    │
-│          │               │    │       ▼                   │    │  │  POST /ask      │    │
-│     ingest.py            │    │  ┌────────────────────┐   │    │  │  POST /compare  │    │
-│  (clean + structure)     │    │  │  rag_chain.py      │◄──┼────┤  │  POST /simplify │    │
-│          │               │    │  │                    │   │    │  │  GET  /health   │    │
-│     chunk.py             │    │  │  ask()             │   │    │  └─────────────────┘    │
-│  (split by ## heading)   │    │  │  compare_laws()    │   │    │         │               │
-│          │               │    │  │  explain_simple()  │   │    │    eval.py              │
-│    embed_store.py        │    │  └─────────┬──────────┘   │    │  (LLM-as-Judge)         │
-│  (MiniLM-L6-v2 embeds)   │    │            │              │    │         │               │
-│          │               │    │     Ollama/llama3.1        │    │     MLflow              │
-│      ChromaDB ───────────┼────┼─► similarity_search(k=8)  │    │  (experiment tracking)  │
-│  (persisted vector store)│    │                           │    │                         │
-└──────────────────────────┘    └──────────────────────────┘    └─────────────────────────┘
-```
-
-**Technology Stack:**
-
-| Layer | Technology |
-|---|---|
-| LLM | Ollama · llama3.1 (local) |
-| Embedding Model | `sentence-transformers/all-MiniLM-L6-v2` |
-| Vector Store | ChromaDB (persisted on disk) |
-| Orchestration | LangChain 0.2 · `RetrievalQA` chain |
-| API Server | FastAPI + Uvicorn |
-| Experiment Tracking | MLflow |
-| Containerisation | Docker + Docker Compose |
-
----
-
-## ✨ Features
-
-### 1. 📖 `/ask` — Grounded Q&A with Citations
-
-Ask any compliance question. The system retrieves the top-8 most relevant chunks from the vector store, filtered to a law domain if specified, and generates a grounded answer with full source citations.
-
-**Request:**
-```json
-POST /ask
-{
-  "question": "What is the tax rate for capital gains on equity mutual funds?",
-  "law_type": "income_tax"
-}
-```
-
-**Actual Response:**
-```json
-{
-  "answer": "The Income-tax Act, 2025 does not explicitly mention a specific tax rate for capital gains on equity mutual funds. However, it provides general provisions related to taxation of income and capital gains under various sections. To determine the applicable tax rate, one would need to refer to other relevant sections or notifications that may have been issued by the Central Government.\n\nIn general, the tax rates for capital gains in India are as follows:\n\n* Short-term capital gains (STCG) - 15% + surcharge and cess\n* Long-term capital gains (LTCG) - 10% + surcharge and cess\n\nHowever, these rates may be applicable only if the equity mutual funds are held for a period of more than one year. If the holding period is less than one year, the gains would be considered as short-term capital gains.\n\nIt's also worth noting that the tax rates mentioned above are subject to change based on the individual's income tax slab and other factors. Therefore, it's always best to consult with a tax professional or refer to the latest tax laws and notifications for accurate information.",
-  "citations": [
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 8"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "# INCOME-TAX ACT, 2025"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 7"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 4"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 2"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 12"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 1"
-    },
-    {
-      "source": "income_tax_act.md",
-      "section": "Section 3"
-    }
-  ]
-}
-```
-
----
-
-### 2. ⚖️ `/compare` — Cross-Domain Law Comparison
-
-Compare how two regulatory frameworks handle the same topic. The system independently retrieves context from each domain and produces a structured side-by-side analysis — using only document evidence, never outside knowledge.
-
-**Request:**
-```json
-POST /compare
-{
-  "question": "How is the threshold limit for registration defined and enforced?",
-  "law_type_a": "income_tax",
-  "law_type_b": "gst"
-}
-```
-
-**Actual Response:**
-```json
-{
-  "comparison": "**Comparison: Threshold Limit for Registration**\n\n**Similarities:**\n\n* Both Income Tax and GST have provisions for determining residential status or registration eligibility based on physical presence in India (Income Tax: Section 6, GST: Not explicitly mentioned but implied through registration requirements).\n* In both domains, the threshold limit for registration is tied to the individual's or entity's income level (Income Tax: Section 6(7), GST: Not explicitly mentioned but implied through advance deposit of tax).\n\n**Differences:**\n\n* **Threshold Limit:** Income Tax has a more complex and nuanced approach to determining residential status, with multiple sub-sections and conditions (Section 6). In contrast, GST does not have an explicit threshold limit for registration, instead relying on the applicant's self-assessment and advance deposit of tax.\n* **Registration Process:** Income Tax requires individuals to meet specific residency requirements or income thresholds to be considered a resident (Section 6). GST, on the other hand, issues a Unique Identity Number (UIN) to applicants who are deemed eligible for registration, regardless of their physical presence in India (Chapter VI Registration).\n* **Advance Deposit of Tax:** GST requires casual taxable persons and non-resident taxable persons to make an advance deposit of tax equivalent to their estimated tax liability (Section 27). Income Tax does not have a similar provision.\n* **Registration Period:** GST has a specific registration period for casual taxable persons and non-resident taxable persons, which is valid for the period specified in the application or 90 days from the effective date of registration, whichever is earlier (Section 27). Income Tax does not have an explicit registration period."
-}
-```
-
----
-
-### 3. 💬 `/simplify` — Plain-English Explanation
-
-Gets a grounded technical answer first, then rewrites it in simple language suitable for a non-lawyer — preserving the original citations unchanged.
-
-**Request:**
-```json
-POST /simplify
-{
-  "question": "What is the definition of aggregate turnover under the CGST Act?",
-  "law_type": "gst"
-}
-```
-
-**Actual Response:**
-```json
-{
-  "answer": "Here's a rewritten version of the answer in plain English:\n\nWhen we talk about \"aggregate turnover\", it means the total value of all goods and services sold by a person from April 1st to the day they need to register under this law. But, if someone is giving loans or advances with interest or discount, that part won't be counted.\n\n(Note: I've kept the original answer's wording as much as possible while still making it simple and easy to understand.)",
-  "citations": [
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "CHAPTER VI REGISTRATION 48 financial year; or (ii) if some or all recipients of the credit do not have any turnover in their States or"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "CHAPTER III LEVY AND COLLECTION OF TAX 29 [Explanation 1.––For the purposes of computing aggregate turnover of a person for determining his"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "REMOVAL OF DIFFICULTY ORDERS 215"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "138. Compounding of offences.—"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "CHAPTER I PRELIMINARY 18 leviable to tax under this Act; (109) ―taxable territory‖means the territory to which the provisions of this Act apply;"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "CHAPTER VI REGISTRATION 49 aggregate turnover in a financial year exceeds ten lakhrupees: [Provided further that the Government may, at"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "4. Transfer of business assets"
-    },
-    {
-      "source": "CGST-Act-Updated-31082021.md",
-      "section": "1."
-    }
-  ]
-}
-```
-
----
-
-## 📊 Eval Results
-
-Evaluated with `python -m eval.run` on a frozen 74-item set (`eval/gold_v1.jsonl`: 57 single-section,
-7 multi-section and 10 out-of-corpus questions across all three domains). Gold answers are verbatim
-quotes from the source documents, so the set does not depend on chunk labels. Metrics: hit@1/3/5/8 and
-MRR@10 (with and without a domain filter), LLM-judge correctness and faithfulness, refusal accuracy on
-out-of-corpus questions, and p50/p95 latency. Every run is logged to MLflow (experiment `xray-target-eval`).
-
-Current numbers and the before/after history are in [CHANGELOG.md](./CHANGELOG.md).
-
-> The "85% retrieval accuracy" previously shown here was hit@8 on 20 self-written questions with the
-> domain given as a filter and labels tuned to the output; the MLflow experiment grid shown here never
-> completed a run. Both were removed.
-
----
-
-## 🚀 Setup Instructions
-
-### Prerequisites
-
-| Requirement | Version |
-|---|---|
-| Python | ≥ 3.11 |
-| Ollama | Latest |
-| Docker (optional) | Latest |
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/<your-username>/ai-compliance-copilot.git
-cd ai-compliance-copilot
-```
-
-### 2. Install Ollama & Pull the Model
-
-```bash
-# Install Ollama from https://ollama.com
-ollama pull llama3.1
-# On Windows Ollama runs as a background app; no `ollama serve` needed.
-```
-
-### 3. Set Up Python Environment
-
-```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-### 4. Configure
-
-All pipeline settings live in `config.yaml`. Any key can be overridden with an env var `RAG_<KEY>`
-(e.g. `RAG_TOP_K=5`); `.env` is optional (see `.env.example`). No API keys are needed.
-
-> If your system has `OLLAMA_HOST=0.0.0.0:11434` set (Ollama's server bind address), that is fine:
-> the app uses `ollama_base_url` from the config, not `OLLAMA_HOST`.
-
-### 5. Prepare Your Law Documents
-
-Place your `.md` law documents into the appropriate domain folders:
-
-```
-data/raw/
-├── income_tax/     ← Income Tax Act .md files
-├── gst/            ← CGST Act, GST circulars .md files
-└── rbi/            ← RBI Directions .md files
-```
-
-> **Tip:** Use [MarkItDown](https://github.com/microsoft/markitdown) or `pypdf` to convert PDF law documents to Markdown before placing them here.
-
-### 6. Build the Vector Store
-
-Run the data pipeline in sequence:
-
-```bash
-# Step 1: Clean and structure raw documents
-python -m src.ingest
-
-# Step 2: Chunk documents by legal section headings
-python -m src.chunk
-
-# Step 3: Embed and persist to ChromaDB
-python -m src.embed_store
-```
-
-### 7. Start the API Server
-
-**Option A — Local (development):**
-```bash
-uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Option B — Docker:**
-```bash
-# Build image
-docker build -t compliance-copilot .
-
-# Run container
-docker run -p 8000:8000 --env-file .env compliance-copilot
-```
-
-**Option C — Docker Compose:**
-```bash
-docker-compose up --build
-```
-
-### 8. Verify the Server
-
-```bash
-curl http://localhost:8000/health
-# → {"status": "ok", "version": "1.0.0"}
-```
-
-Open the interactive API docs at: **[http://localhost:8000/docs](http://localhost:8000/docs)**
-
----
-
-## 📡 API Reference
-
-| Method | Endpoint | Description |
+| | as shipped (v1) | `default` preset (v2) |
 |---|---|---|
-| `POST` | `/ask` | RAG Q&A with citations |
-| `POST` | `/compare` | Side-by-side cross-domain comparison |
-| `POST` | `/simplify` | Plain-English answer (preserves citations) |
-| `GET` | `/health` | Health check |
+| hit@1 / hit@5 / hit@8 | 0.594 / 0.734 / 0.766 | 0.547 / 0.750 / 0.813 |
+| MRR@10 | 0.653 | 0.651 |
+| Answer correctness (judge, 1–5) | 2.75 | 3.22 |
+| Faithful to retrieved context | 61% | 73% |
+| Refuses out-of-corpus questions | 10/10 | 10/10 |
+| Wrongly refuses in-corpus questions | 20% | 19% |
+| `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s |
 
-### Valid `law_type` values
+Embedder benchmark: `bge-small-en-v1.5` with 512-token chunks raises MRR@10 to 0.732 and hit@1 to 0.672, but it has not
+had an end-to-end answer eval yet, so it is the `bge_small` preset, not the default.
 
-| Value | Domain |
-|---|---|
-| `income_tax` | Income Tax Act, 2025 |
-| `gst` | CGST Act / GST Circulars |
-| `rbi` | RBI Directions & Frameworks |
-| `null` / omit | Search across all domains |
-
-### Run Evaluation
-
-```bash
-python -m eval.run --retrieval-only   # ~1 min, retrieval metrics only
-python -m eval.run                     # + generation and LLM judge (needs Ollama: llama3.1, qwen3.5:4b)
-```
+Caveats: 64 in-corpus questions, so one question = 1.6 points. All 74 gold items were drafted by an LLM and
+have **not** been human-verified yet. The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
+Full history, including what was wrong with the old "85%" claim: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-## 📁 Project Structure
+## Setup on Windows (local, no Docker)
 
+Prerequisites: Python 3.11, [Ollama for Windows](https://ollama.com) (runs as a tray app; don't run `ollama serve`), Git.
+
+```powershell
+git clone https://github.com/Pranav-fscty/AI-Compliance-Copilot.git
+cd AI-Compliance-Copilot
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.lock        # exact pins (CPU torch from the PyTorch index); requirements.txt = direct deps
+ollama pull llama3.1
 ```
-compliance-copilot/
-│
-├── src/
-│   ├── api.py            # FastAPI app — /ask, /compare, /simplify, /health
-│   ├── rag_chain.py      # retrieve(), ask(), compare_laws(), explain_simple()
-│   ├── embed_store.py    # ChromaDB vector store build & load
-│   ├── chunk.py          # ## headings, then token-capped to the embedder window
-│   ├── ingest.py         # Raw .md ingestion & text cleaning pipeline
-│   └── config.py         # Loads config.yaml + RAG_<KEY> env overrides
-│
-├── data/
-│   ├── raw/
-│   │   ├── income_tax/   # Raw Income Tax .md files
-│   │   ├── gst/          # Raw GST .md files
-│   │   └── rbi/          # Raw RBI .md files
-│   └── processed/        # Cleaned JSON + chunks (auto-generated)
-│
-├── eval/
-│   ├── gold_v1.jsonl     # Frozen 74-item eval set (verbatim-quote gold)
-│   └── run.py            # python -m eval.run
-│
-├── chroma_db/            # Persisted ChromaDB vector store (auto-generated)
-├── mlruns/               # MLflow experiment runs (auto-generated)
-│
-├── Dockerfile
-├── docker-compose.yml
-├── config.yaml           # All pipeline settings
-├── requirements.txt      # Pinned direct deps (requirements.lock = full pins)
-└── .env.example
+
+Build the index for the active preset:
+
+```powershell
+python -m src.ingest        # only if you have data/raw (gitignored; data/processed/*.json is committed)
+python -m src.chunk         # -> data/processed/chunks/<collection>/
+python -m src.embed_store   # -> chroma_db/, collection named in the preset
+uvicorn src.api:app --port 8000
 ```
+
+```powershell
+curl.exe http://localhost:8000/health
+curl.exe -X POST http://localhost:8000/ask -H "Content-Type: application/json" `
+  -d '{\"question\": \"Who is a Non-Banking Financial Company?\"}'
+```
+
+> If `OLLAMA_HOST=0.0.0.0:11434` is set on your machine, that is Ollama's *server bind address*. The app uses
+> `ollama_base_url` from the config instead, so you don't need to change it.
+
+## Setup with Docker Compose
+
+Four separate services, so each one can be stopped, slowed or broken on its own: `api`, `chroma` (server mode),
+`ollama`, `mlflow`, all with healthchecks.
+
+```powershell
+docker compose up -d --build
+docker compose run --rm api python -m src.chunk
+docker compose run --rm api python -m src.embed_store     # index into the chroma service
+docker compose ps                                         # wait for all four to be healthy
+curl.exe http://localhost:8000/health
+```
+
+- The `ollama` container mounts your host models folder (`%USERPROFILE%\.ollama\models`), so models aren't downloaded again.
+  Its image tag must match your host Ollama version (`OLLAMA_IMAGE_TAG`). Without that folder, run `docker compose exec ollama ollama pull llama3.1`.
+- GPU: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` (needs the NVIDIA driver with WSL2 support).
+- Ports: api 8000, chroma 8001, mlflow 5000. Ollama isn't published, because the host Ollama already uses 11434.
+- **Status:** the compose files pass `docker compose config`, but the full stack has not been run end to end yet (see CHANGELOG).
 
 ---
 
-## 🧪 Experiment Tracking
+## Configuration and presets
 
-`eval.run` logs every run to MLflow at `./mlruns` (experiment `xray-target-eval`) with the full
-config, data hashes and judge model digest as params. View with `mlflow ui --backend-store-uri ./mlruns`.
+Everything that defines the pipeline is in [`config.yaml`](./config.yaml): chunking strategy/size/overlap, embedder and its
+prefixes, distance, `hnsw_search_ef`, `top_k`, reranker, prompt template, LLM, `num_ctx`, temperature, Chroma and Ollama endpoints.
+
+Precedence: `config.yaml` < `presets/<RAG_PRESET>.yaml` < `RAG_<KEY>` environment variables. A misspelled preset, preset key
+or `RAG_*` variable raises an error instead of being ignored.
+
+| `RAG_PRESET` | Embedder (chunk tokens) | top_k | LLM | Eval status |
+|---|---|---|---|---|
+| `default` | all-MiniLM-L6-v2, HF (256) | 8 | llama3.1 8B | full |
+| `bge_small` | bge-small-en-v1.5, HF (512) | 8 | llama3.1 8B | retrieval only (best retriever) |
+| `nomic` | nomic-embed-text, Ollama (500) | 5 | llama3.1 8B | retrieval only |
+| `small_llm` | all-MiniLM-L6-v2, HF (256) | 4 | qwen3.5:4b | none |
+
+Each preset uses its own Chroma collection, so all of them can be indexed side by side:
+
+```powershell
+$env:RAG_PRESET = "bge_small"; python -m src.chunk; python -m src.embed_store; uvicorn src.api:app --port 8000
+```
+
+## Ground truth for RAG X-Ray
+
+```powershell
+python -m src.manifest      # -> ground_truth/pipeline_manifest.json for the active preset
+```
+
+The manifest is built from the config plus live facts: chunk counts and token lengths, collection size and HNSW settings,
+embedding dimension, Ollama model digests, the full prompt template and its hash, the git commit and whether the tree is dirty.
+The API never reads it. `ground_truth/` is gitignored and not in the Docker image.
+
+## API
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/ask` | `{"question": str, "law_type": "gst" \| "rbi" \| "income_tax" \| null}` → `{"answer", "citations": [{"source", "section"}]}` |
+| `GET` | `/health` | 200 `{"status":"ok","index":"ok","llm":"ok"}`, or 503 `degraded` if Chroma is empty or unreachable, or Ollama is down |
+| `POST` | `/compare` | `{"question", "law_type_a", "law_type_b"}` → `{"comparison"}` |
+| `POST` | `/simplify` | like `/ask`, then a plain-English rewrite |
+
+- Black-box by default: no `/docs` or `/openapi.json`. `debug_endpoints: true` (or `RAG_DEBUG_ENDPOINTS=true`) adds them plus
+  `POST /debug/retrieve`, which returns the raw retrieved chunks. Keep it off when testing with X-Ray.
+- Every response has an `X-Request-ID` header. Send your own (`[A-Za-z0-9._-]{1,64}`) to correlate with the logs.
+- Logs are JSON lines on stderr with `request_id`, plus one `request` line per call (method, path, status, duration_ms).
+- No fault-injection hooks in the app: inject faults from outside (stop or slow a container, corrupt a collection, etc.).
 
 ---
 
-## 📝 License
+## Evaluation
+
+```powershell
+python -m eval.run --retrieval-only                  # ~1 min: hit@1/3/5/8, MRR@10, multi-section coverage
+python -m eval.run --run-name my_run                 # + generation and judge (needs llama3.1 and qwen3.5:4b in Ollama)
+$env:RAG_PRESET = "bge_small"; python -m eval.run --run-name bge_small
+python -m eval.bench embedders                       # rebuild + retrieval-eval each embedder candidate
+python -m eval.bench llms                            # full eval per LLM (needs ~16 GB RAM free; resumable)
+mlflow ui --backend-store-uri ./mlruns               # or MLFLOW_TRACKING_URI=http://localhost:5000 with compose
+pytest -q tests eval/test_run.py
+```
+
+Full runs save a checkpoint after every step (`eval/checkpoints/`), so a crash or OOM kill can be resumed by running the same
+command again. `--fresh` starts over. Every run logs the full resolved config, gold/chunk/index hashes and model digests.
+
+---
+
+## Project layout
+
+```
+config.yaml            all pipeline settings
+presets/               default, bge_small, nomic, small_llm overlays
+src/
+  ingest.py            data/raw -> data/processed/{domain}.json
+  chunk.py             heading split + token cap with the embedder's tokenizer
+  embed_store.py       embedder (hf | ollama) + Chroma (embedded or server)
+  rag_chain.py         retrieve, build_prompt, ask, compare_laws, explain_simple
+  api.py               FastAPI app, request ids, health checks
+  logs.py              JSON log formatter
+  manifest.py          ground_truth/pipeline_manifest.json
+  config.py            config loading and precedence
+eval/
+  gold_v1.jsonl        frozen eval set (do not edit; make gold_v2)
+  run.py               eval runner -> MLflow
+  bench.py             Phase 3 embedder / LLM benchmark
+  bench_embedders.json benchmark results
+tests/                 config tests
+docker-compose.yml     api, chroma, ollama, mlflow
+docker-compose.gpu.yml GPU override for ollama
+```
+
+## Known limitations
+
+- Income-tax coverage is only Chapters I–III of the Act; questions about later chapters are refused or answered badly.
+- The raw source Markdown (`data/raw/`) is not in the repo, so a fresh clone can re-chunk and re-index but not re-ingest.
+- Section headings in citations are often noisy because of the PDF→Markdown conversion.
+- `/compare` and `/simplify` prompts are in code, not in `config.yaml`, and have no eval.
+- `reranker` accepts only `none`.
 
 No license file is included yet.
