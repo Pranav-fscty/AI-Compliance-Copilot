@@ -16,8 +16,7 @@ from typing import TypedDict
 
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
-from langchain_ollama import ChatOllama
+import ollama
 
 from src.config import CFG
 from src.embed_store import load_vectorstore
@@ -25,6 +24,7 @@ from src.embed_store import load_vectorstore
 logger: logging.Logger = logging.getLogger("compliance-copilot.rag_chain")
 
 VALID_LAW_TYPES: frozenset[str] = frozenset(CFG["domains"])
+REFUSAL: str = "not available in the indexed documents"  # must match the refusal sentence in prompt_template
 if CFG["reranker"] != "none":
     raise NotImplementedError(f"reranker={CFG['reranker']!r}: only 'none' is implemented")
 
@@ -64,11 +64,16 @@ class AskResult(TypedDict):
 
 
 @functools.lru_cache(maxsize=1)
-def get_llm() -> ChatOllama:
-    """Cached ChatOllama. num_ctx is explicit: Ollama's default silently truncated long prompts."""
-    logger.info("Initialising ChatOllama model=%s num_ctx=%s", CFG["llm_model"], CFG["num_ctx"])
-    return ChatOllama(model=CFG["llm_model"], temperature=CFG["temperature"], num_ctx=CFG["num_ctx"],
-                      base_url=CFG["ollama_base_url"])
+def get_llm() -> ollama.Client:
+    logger.info("LLM model=%s num_ctx=%s via %s", CFG["llm_model"], CFG["num_ctx"], CFG["ollama_base_url"])
+    return ollama.Client(host=CFG["ollama_base_url"])
+
+
+def generate(prompt: str) -> str:
+    """One-shot LLM call. num_ctx is explicit: Ollama's default (4096) silently truncated long prompts."""
+    resp = get_llm().chat(model=CFG["llm_model"], messages=[{"role": "user", "content": prompt}], think=CFG["llm_think"],
+                          options={"temperature": CFG["temperature"], "num_ctx": CFG["num_ctx"]})
+    return resp["message"]["content"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -172,8 +177,9 @@ def ask(question: str, law_type: str | None = None) -> AskResult:
     )
 
     source_docs = retrieve(question, law_type)
-    answer: str = get_llm().invoke([HumanMessage(content=build_prompt(question, source_docs))]).content
-    citations: list[Citation] = _extract_citations(source_docs)
+    answer: str = generate(build_prompt(question, source_docs))
+    # A refusal relied on no chunk, so citing all retrieved chunks would be misleading.
+    citations: list[Citation] = [] if REFUSAL in answer.lower() else _extract_citations(source_docs)
 
     logger.info(
         "ask() completed — answer_length=%d  citations=%d",
@@ -213,7 +219,6 @@ def compare_laws(question: str, law_type_a: str, law_type_b: str) -> str:
     )
 
     db: Chroma = get_db()
-    llm: ChatOllama = get_llm()
 
     # Retrieve documents separately for each domain
     def _retrieve(law_type: str) -> list:
@@ -269,8 +274,7 @@ def compare_laws(question: str, law_type_a: str, law_type_b: str) -> str:
     )
 
     logger.debug("Sending comparison prompt to LLM...")
-    response = llm.invoke([HumanMessage(content=prompt)])
-    comparison: str = response.content
+    comparison: str = generate(prompt)
 
     logger.info(
         "compare_laws() completed — response_length=%d", len(comparison)
@@ -315,8 +319,6 @@ def explain_simple(question: str, law_type: str | None = None) -> AskResult:
         len(technical_answer),
     )
 
-    llm: ChatOllama = get_llm()
-
     simplify_prompt = (
         "You are a helpful assistant explaining Indian law to ordinary citizens.\n"
         "Rewrite the following legal answer in plain, simple English.\n"
@@ -327,8 +329,7 @@ def explain_simple(question: str, law_type: str | None = None) -> AskResult:
         "PLAIN-ENGLISH VERSION:"
     )
 
-    response = llm.invoke([HumanMessage(content=simplify_prompt)])
-    simple_answer: str = response.content
+    simple_answer: str = generate(simplify_prompt)
 
     logger.info(
         "explain_simple() completed — simplified_length=%d  citations=%d",

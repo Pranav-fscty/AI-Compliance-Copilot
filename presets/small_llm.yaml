@@ -1,0 +1,5 @@
+# small_llm: default retriever (MiniLM, 256-token chunks) but qwen3.5:4b as the LLM and top_k 4.
+# Different generator family/size and context width from default, for black-box fingerprinting tests.
+# Eval status: NOT evaluated. Note qwen3.5:4b is also the eval judge, so its scores would carry self-preference bias.
+llm_model: qwen3.5:4b
+top_k: 4

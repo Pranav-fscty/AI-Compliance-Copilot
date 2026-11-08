@@ -14,7 +14,7 @@ from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from transformers import AutoTokenizer
 
-from src.config import CFG, path
+from src.config import CFG, chunks_file, path
 
 logger: logging.Logger = logging.getLogger("compliance-copilot.chunk")
 
@@ -26,7 +26,7 @@ ENCODING: str = "utf-8"
 def get_splitter() -> RecursiveCharacterTextSplitter:
     if CFG["chunk_strategy"] != "heading_then_tokens":
         raise ValueError(f"Unsupported chunk_strategy: {CFG['chunk_strategy']}")
-    tok = AutoTokenizer.from_pretrained(CFG["embedding_model"])
+    tok = AutoTokenizer.from_pretrained(CFG["chunk_tokenizer"] or CFG["embedding_model"])
     return RecursiveCharacterTextSplitter.from_huggingface_tokenizer(
         tok, chunk_size=CFG["chunk_size"], chunk_overlap=CFG["chunk_overlap"])
 
@@ -56,7 +56,7 @@ def chunk_by_section(text: str, source: str, law_type: str) -> list[dict]:
 
 
 def chunk_domain(domain: str, processed_dir: Path) -> list[dict]:
-    """Chunk all documents of a domain, drop exact-duplicate texts, write {domain}_chunks.json."""
+    """Chunk all documents of a domain, drop exact-duplicate texts, write chunks_file(domain)."""
     input_path = processed_dir / f"{domain}.json"
     if not input_path.exists():
         raise FileNotFoundError(f"Processed file not found: {input_path}. Run src/ingest.py first.")
@@ -70,7 +70,8 @@ def chunk_domain(domain: str, processed_dir: Path) -> list[dict]:
                 seen.add(c["text"])
                 all_chunks.append(c)
 
-    output_path = processed_dir / f"{domain}_chunks.json"
+    output_path = chunks_file(domain)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(all_chunks, ensure_ascii=False, indent=2), encoding=ENCODING)
     logger.info("Domain '%s': %d doc(s) -> %d chunk(s) -> %s", domain, len(docs), len(all_chunks), output_path)
     return all_chunks

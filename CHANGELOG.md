@@ -4,7 +4,40 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
-## Unreleased: Phase 2 (fixes and a single config)
+## Phase 3: embedder and LLM benchmark
+
+Command: `python -m eval.bench embedders` (each candidate chunked and indexed into its own Chroma collection,
+then `eval.run --retrieval-only`). Results are in `eval/bench_embedders.json` and in MLflow runs `bench_*_retrieval`.
+Same frozen 64 in-corpus questions, no metadata filter.
+
+| Embedder (chunk tokens) | hit@1 | hit@3 | hit@5 | hit@8 | MRR@10 | multi full cov@5 | retrieve p50 |
+|---|---|---|---|---|---|---|---|
+| all-MiniLM-L6-v2 (256), Phase 2 default | 0.547 | 0.734 | 0.750 | 0.813 | 0.651 | 0.286 | 18 ms |
+| bge-small-en-v1.5 (256) | 0.641 | 0.734 | 0.766 | 0.813 | 0.698 | 0.429 | 30 ms |
+| **bge-small-en-v1.5 (512)** | **0.672** | **0.781** | 0.813 | 0.828 | **0.732** | **0.429** | 29 ms |
+| bge-base-en-v1.5 (256) | 0.594 | 0.750 | 0.813 | 0.844 | 0.689 | 0.286 | 70 ms |
+| bge-base-en-v1.5 (512) | 0.641 | 0.766 | **0.828** | **0.891** | 0.720 | 0.286 | 61 ms |
+| nomic-embed-text via Ollama (500) | 0.625 | 0.797 | 0.797 | 0.859 | 0.721 | 0.429 | 20 ms |
+| mxbai-embed-large via Ollama (512) | 0.547 | 0.766 | 0.813 | 0.875 | 0.666 | 0.286 | 26 ms |
+
+Chunk size is always at or below the embedder's window, measured with its own tokenizer (max 504 for bge at 512).
+Retrieve latency includes the query embedding; HF models run on CPU (torch CPU build), Ollama embedders on the GPU.
+
+**Reading it honestly:**
+- One question = 1.6 points, so most gaps between the top four are 1-3 questions and could be noise. The clear result: every candidate beats MiniLM on hit@1/MRR, and 512-token chunks beat 256 for the same bge model.
+- bge-small (512) is the best on ranking (hit@1, MRR) and 33M params; bge-base (512) is best on hit@5/8 but 3x larger and 2x slower on CPU.
+
+**LLM benchmark: not completed.** `python -m eval.bench llms` (llama3.1 vs qwen3:8b vs qwen3.5:4b, full eval on the bge-small retriever) was killed for low system memory after 9 of 74 generations; there are no LLM comparison numbers. Resume with the same command (checkpoints are kept). Known issue for it: qwen3.5:4b is also the judge, so its own scores would be biased upward.
+
+**Decision:** the default stays the Phase 2 config, because the bge-small retriever has no end-to-end answer eval yet and the ground rule is no embedder/chunking change without one. bge-small (512) ships as preset `bge_small` with a note that it is the recommended next default.
+
+### Changed in Phase 3
+- `embedding_backend` (`hf` | `ollama`), `embed_query_prefix` / `embed_doc_prefix` (bge / nomic need them), `chunk_tokenizer` config keys. The embedder is a small in-house wrapper over sentence-transformers / Ollama `/api/embed` instead of the deprecated `langchain_community` HuggingFaceEmbeddings; vectors are identical for MiniLM (retrieval metrics unchanged to the last digit).
+- The LLM is called through the `ollama` client instead of `langchain-ollama`'s ChatOllama, so `think=false` can be passed (qwen3 models otherwise emit a reasoning trace); `langchain-ollama` dropped from requirements.
+- Fixed: `RAG_EMBED_QUERY_PREFIX="search_query: "` was parsed by YAML into a dict; string-valued keys now keep the raw env string.
+- Fixed: `/ask` returned all retrieved chunks as citations on a refusal; refusals now return no citations.
+
+## Phase 2: fixes and a single config
 
 ### Before / after
 
@@ -74,7 +107,6 @@ Caveats:
 ### Still open (not fixed)
 - `/compare` and `/simplify` prompts still live in code, not config.
 - Citation headings are only partly cleaned (cosmetic).
-- `/ask` returns all retrieved chunks as citations even when the answer is the refusal string (found in the Phase 2 smoke test).
 - Income Tax coverage is still only Chapters I–III of the Act.
 - Gold set human verification: 0 of 74 items done.
 - `reranker` is a config key, but the only allowed value is `none`.

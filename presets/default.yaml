@@ -1,0 +1,3 @@
+# default: config.yaml as is. MiniLM-L6 (256-token chunks) + llama3.1 8B, top_k 8.
+# Eval status: full eval (retrieval + answers + judge), MLflow run phase2_fixed. See CHANGELOG.md.
+{}

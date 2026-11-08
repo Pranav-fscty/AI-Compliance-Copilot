@@ -60,3 +60,6 @@ htmlcov/
 *.log
 # eval checkpoints (resumable runs)
 eval/checkpoints/
+
+# chunk files are derived (python -m src.chunk), one folder per collection
+data/processed/chunks/

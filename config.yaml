@@ -14,10 +14,16 @@ chunk_strategy: heading_then_tokens  # split on '## ' headings, then cap each se
 chunk_size: 256                      # in tokens of the embedding model's own tokenizer (MiniLM window = 256)
 chunk_overlap: 32
 min_chunk_chars: 50
+chunk_tokenizer: null                # HF tokenizer used to size chunks; null = embedding_model (set it for Ollama embedders)
 
 # --- index ---
+embedding_backend: hf    # hf = sentence-transformers in-process (CPU) | ollama = Ollama /api/embed
 embedding_model: sentence-transformers/all-MiniLM-L6-v2
-chroma_dir: chroma_db
+embed_query_prefix: ""    # e.g. bge: "Represent this sentence for searching relevant passages: ", nomic: "search_query: "
+embed_doc_prefix: ""      # e.g. nomic: "search_document: "
+chroma_dir: chroma_db     # embedded mode (local dev)
+chroma_host: null         # set (e.g. "chroma") to use a Chroma server instead of chroma_dir
+chroma_port: 8000
 collection: compliance_minilm_c256
 distance: cosine          # Chroma hnsw:space
 hnsw_search_ef: 100       # default 10 made results change between restarts
@@ -30,7 +36,9 @@ reranker: none            # only "none" is implemented
 # --- generation ---
 llm_model: llama3.1
 temperature: 0
+llm_think: false          # passed as Ollama think=; must stay off for qwen3* or answers start with a reasoning trace
 num_ctx: 8192
+debug_endpoints: false    # true adds POST /debug/retrieve and /docs; keep false for black-box testing
 ollama_base_url: http://localhost:11434   # NOT OLLAMA_HOST: that var is Ollama's server bind address
 prompt_template: |-  # identical to the original STRICT_PROMPT
   You are a legal compliance assistant for Indian law.

@@ -175,10 +175,12 @@ def main() -> None:
 
     items = load_gold()
     sys.path.insert(0, str(ROOT))
-    from src.config import CFG, path
-    hashes = {"gold_sha": sha(GOLD), "chroma_sqlite_sha": sha(path("chroma_dir") / "chroma.sqlite3")}  # before opening the DB
+    from src.config import CFG, PRESET, chunks_file, path
+    hashes = {"gold_sha": sha(GOLD), "preset": PRESET}
+    if not CFG["chroma_host"]:  # hash before opening the DB; a Chroma server has no local file to hash
+        hashes["chroma_sqlite_sha"] = sha(path("chroma_dir") / "chroma.sqlite3")
     for d in CFG["domains"]:
-        hashes[f"chunks_{d}_sha"] = sha(path("processed_dir") / f"{d}_chunks.json")
+        hashes[f"chunks_{d}_sha"] = sha(chunks_file(d))
     import src.rag_chain as rc
 
     rc.get_db()
@@ -264,7 +266,7 @@ def main() -> None:
         if params["num_ctx_observed"]:
             metrics["pct_prompts_over_num_ctx"] = sum(t > params["num_ctx_observed"] for t in ptoks) / len(ptoks)
 
-    mlflow.set_tracking_uri((ROOT / "mlruns").as_uri())
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI") or (ROOT / "mlruns").as_uri())
     mlflow.set_experiment(EXPERIMENT)
     with mlflow.start_run(run_name=args.run_name + ("_retrieval" if args.retrieval_only else "")):
         mlflow.log_params(params)

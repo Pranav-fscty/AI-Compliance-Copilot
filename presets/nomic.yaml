@@ -1,0 +1,12 @@
+# nomic: nomic-embed-text served by Ollama (500-token chunks, required task prefixes) + llama3.1 8B, top_k 5.
+# Different embedder family, backend and top_k from default, for black-box fingerprinting tests.
+# Eval status: retrieval only (bench run nomic_c512, which used these settings except top_k=8); answers not measured.
+embedding_backend: ollama
+embedding_model: nomic-embed-text
+chunk_tokenizer: nomic-ai/nomic-embed-text-v1.5
+embed_query_prefix: "search_query: "
+embed_doc_prefix: "search_document: "
+chunk_size: 500
+chunk_overlap: 64
+top_k: 5
+collection: compliance_nomic_c500
