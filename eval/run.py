@@ -29,7 +29,7 @@ import ollama
 import tiktoken
 
 ROOT = Path(__file__).resolve().parent.parent
-GOLD = ROOT / "eval" / "gold_v1.jsonl"
+GOLD = ROOT / "eval" / "gold_v2.jsonl"  # v1 kept frozen for the Phase 1-3 numbers; --gold to pick
 RAW = ROOT / "data" / "raw"
 EXPERIMENT = "xray-target-eval"
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "qwen3.5:4b")
@@ -169,7 +169,11 @@ def main() -> None:
     ap.add_argument("--retrieval-only", action="store_true")
     ap.add_argument("--run-name", default="baseline_as_shipped")
     ap.add_argument("--fresh", action="store_true", help="discard the checkpoint for this run name")
+    ap.add_argument("--gold", help="gold file relative to the repo root (default eval/gold_v2.jsonl)")
     args = ap.parse_args()
+    global GOLD
+    if args.gold:
+        GOLD = ROOT / args.gold
     logging.basicConfig(level=logging.WARNING)
     sys.stdout.reconfigure(encoding="utf-8")  # Windows cp1252 console crashed on '₹' in judge output
 
@@ -211,7 +215,8 @@ def main() -> None:
         if ckpt.exists():
             for line in ckpt.read_text(encoding="utf-8").splitlines():
                 rec = json.loads(line)
-                if rec["stage"] == "gen" or rec.get("judge_model") == JUDGE_MODEL:
+                # a judge verdict is only reusable with the same judge AND the same gold (the judge sees the gold quotes)
+                if rec["stage"] == "gen" or (rec.get("judge_model") == JUDGE_MODEL and rec.get("gold_sha") == hashes["gold_sha"]):
                     done[(rec["stage"], rec["id"])] = rec
 
         def save(rec):
@@ -238,7 +243,7 @@ def main() -> None:
             p = per_item[it["id"]]
             rec = done.get(("judge", it["id"]))
             if rec is None:
-                rec = {"stage": "judge", "id": it["id"], "judge_model": JUDGE_MODEL, "judge": judge(client, it, p["answer"], p["_ctx"])}
+                rec = {"stage": "judge", "id": it["id"], "judge_model": JUDGE_MODEL, "gold_sha": hashes["gold_sha"], "judge": judge(client, it, p["answer"], p["_ctx"])}
                 save(rec)
             p.pop("_ctx")
             p["judge"] = rec["judge"]

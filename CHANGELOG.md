@@ -4,6 +4,22 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: gold set re-check (gold_v2)
+
+The user asked me to check the gold items myself instead of verifying them by hand. **This is a self-check by the same model that drafted them, not a human review**; items carry `"checked": "claude-recheck-2026-11-08"` and `author` stays `claude-draft`.
+
+Method: for every item, the reference answer was read against ~650 characters of the raw source around its gold quote; every quote was counted across the whole raw corpus.
+
+- **All 64 in-corpus reference answers are supported by the source text.** Two looked wrong at first and were confirmed correct: g13 (28% for HS 8415 is stated in paragraph 2.1–2.2) and r22 (the 90-day NPA norm with the 180→90-day glide path to 31 March 2026 is RBI-6 Para 44/51).
+- **All 10 out-of-corpus items are absent from the corpus** (already enforced by the runner).
+- **4 gold quotes were ambiguous:** each also matches a passage about something else, which could award a retrieval hit for the wrong section. Fixed in `eval/gold_v2.jsonl` (v1 left frozen):
+  - it02 `It extends to the whole of India` also appears in the CGST Act → quote now includes `This Act may be called the Income-tax Act, 2025.`
+  - g03 and m01 `within thirty days from the date on which he becomes liable to registration` also appears in CGST s.18 (input tax credit) → quote now starts at `in which he is so liable`, only in s.25.
+  - g11 the aggregate-turnover quote also matches the definition of "turnover in State" → extended to `..., exempt supplies, exports of goods or services or both`.
+- **Effect:** retrieval metrics are identical on v1 and v2 for the `default` and `bge_small` presets, so these ambiguities did not inflate any reported number.
+- Other quotes occurring twice are fine: copies in the two excluded mislabeled files (not indexed), or a second occurrence on the same topic (g02 s.10(2A), g08 Removal of Difficulty orders quoting s.107).
+- Runner: default gold is now `gold_v2.jsonl` (`--gold eval/gold_v1.jsonl` reproduces old runs). A cached judge verdict is reused only if the judge model **and** the gold-file hash match, because the judge prompt includes the gold quotes.
+
 ## v2.0-xray-target (2026-11-08)
 
 Summary of the refinement (Phases 0–5). Detail per phase below.
@@ -15,7 +31,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 - Ground truth for RAG X-Ray: `python -m src.manifest`; the API is black-box by default.
 
 **Not done / not verified (read before relying on this release)**
-1. **Gold set not human-verified:** 0 of 74 items checked by a person. Every number depends on LLM-drafted gold.
+1. **Gold set not human-verified:** 0 of 74 items checked by a person (a self-check by the drafting model was done after release; see above).
 2. **LLM benchmark not run:** killed for low memory after 9/74 generations. No qwen3:8b / qwen3.5:4b comparison exists.
 3. **Default config not changed:** bge-small (512) is the best retriever but has no end-to-end answer eval, so it ships as preset `bge_small`.
 4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.

@@ -42,7 +42,7 @@ prompt. If the model answers with the refusal sentence, citations are empty. No 
 
 ## Results
 
-Frozen eval set `eval/gold_v1.jsonl`: 74 questions (57 single-section, 7 multi-section, 10 not in the corpus). Gold = verbatim quotes
+Frozen eval set `eval/gold_v2.jsonl` (v1 with 4 ambiguous quotes fixed; same numbers): 74 questions (57 single-section, 7 multi-section, 10 not in the corpus). Gold = verbatim quotes
 from `data/raw`, so it works for any chunking. Judge = qwen3.5:4b (different model family from the generator), temperature 0.
 Retrieval numbers are without a domain filter.
 
@@ -60,7 +60,7 @@ Embedder benchmark: `bge-small-en-v1.5` with 512-token chunks raises MRR@10 to 0
 had an end-to-end answer eval yet, so it is the `bge_small` preset, not the default.
 
 Caveats: 64 in-corpus questions, so one question = 1.6 points. All 74 gold items were drafted by an LLM and
-have **not** been human-verified yet. The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
+re-checked against the source by the same LLM, but **not** human-verified. The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
 Full history, including what was wrong with the old "85%" claim: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
@@ -197,7 +197,8 @@ src/
   manifest.py          ground_truth/pipeline_manifest.json
   config.py            config loading and precedence
 eval/
-  gold_v1.jsonl        frozen eval set (do not edit; make gold_v2)
+  gold_v1.jsonl        original frozen eval set (Phases 1-3 numbers)
+  gold_v2.jsonl        current eval set (4 quotes disambiguated; do not edit, make gold_v3)
   run.py               eval runner -> MLflow
   bench.py             Phase 3 embedder / LLM benchmark
   bench_embedders.json benchmark results
