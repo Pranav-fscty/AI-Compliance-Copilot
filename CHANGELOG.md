@@ -4,6 +4,31 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: LLM benchmark completed
+
+`python -m eval.bench llms` on the default retriever (bge-small-en-v1.5, 512-token chunks, top_k 8), gold_v2, judge
+qwen3.5:4b (temp 0, seed 0), no domain filter. Retrieval is identical across the three runs, so only the LLM differs.
+MLflow runs `bench_llm_llama3.1`, `bench_llm_qwen3-8b`, `bench_llm_qwen3.5-4b`; numbers in `eval/bench_llms.json`.
+
+| | llama3.1 (default) | qwen3:8b | qwen3.5:4b |
+|---|---|---|---|
+| correct rate (≥4) | 0.500 (32/64) | 0.563 (36/64) | 0.531 (34/64) |
+| correctness (1–5) | 3.34 | 3.52 | 3.52 |
+| faithfulness | **0.813 (52/64)** | 0.750 (48/64) | 0.641 (41/64) |
+| false refusal rate | 0.125 | 0.125 | 0.141 |
+| refusal accuracy (ooc) | 1.0 | 1.0 | 1.0 |
+| /ask p50 / p95 | 3.8 s / 9.7 s | 5.2 s / 18.2 s | 2.0 s / 5.8 s |
+| judge parse failures | 0 | 0 | 0 |
+
+- **Default stays llama3.1.** It is the most faithful to the retrieved text, which matters most for compliance answers.
+  The qwen models score 2–4 more correct answers out of 64, which is within noise for one judge pass and an
+  unverified gold set.
+- qwen3.5:4b is also the judge, so its correctness score is likely biased upward. Its faithfulness is the lowest
+  despite that bias.
+- qwen3:8b is the slowest (p95 almost 2x llama3.1). qwen3.5:4b is the fastest.
+- This run used top_k 8. The `small_llm` preset (qwen3.5:4b, top_k 4) itself still has no answer eval.
+- Single run per model: judge variance not measured.
+
 ## Post-release: default switched to bge-small-en-v1.5 (512-token chunks)
 
 Before/after on the same frozen set (`gold_v2`), same judge (qwen3.5:4b), same LLM (llama3.1), no domain filter.
@@ -55,7 +80,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 
 **Not done / not verified (read before relying on this release)**
 1. **Gold set not human-verified:** 0 of 74 items checked by a person (a self-check by the drafting model was done after release; see above).
-2. **LLM benchmark not run:** killed for low memory after 9/74 generations. No qwen3:8b / qwen3.5:4b comparison exists.
+2. ~~LLM benchmark not run~~ Resolved after release: all three LLMs evaluated, llama3.1 kept (see above).
 3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
 4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.
 5. `small_llm` and `nomic` presets have no answer eval.
@@ -98,7 +123,7 @@ Retrieve latency includes the query embedding; HF models run on CPU (torch CPU b
 - One question = 1.6 points, so most gaps between the top four are 1-3 questions and could be noise. The clear result: every candidate beats MiniLM on hit@1/MRR, and 512-token chunks beat 256 for the same bge model.
 - bge-small (512) is the best on ranking (hit@1, MRR) and 33M params; bge-base (512) is best on hit@5/8 but 3x larger and 2x slower on CPU.
 
-**LLM benchmark: not completed.** `python -m eval.bench llms` (llama3.1 vs qwen3:8b vs qwen3.5:4b, full eval on the bge-small retriever) was killed for low system memory after 9 of 74 generations; there are no LLM comparison numbers. Resume with the same command (checkpoints are kept). Known issue for it: qwen3.5:4b is also the judge, so its own scores would be biased upward.
+**LLM benchmark: not completed in Phase 3** (completed after release, see the top of this file). `python -m eval.bench llms` (llama3.1 vs qwen3:8b vs qwen3.5:4b, full eval on the bge-small retriever) was killed for low system memory after 9 of 74 generations; there are no LLM comparison numbers. Resume with the same command (checkpoints are kept). Known issue for it: qwen3.5:4b is also the judge, so its own scores would be biased upward.
 
 **Decision:** the default stays the Phase 2 config, because the bge-small retriever has no end-to-end answer eval yet and the ground rule is no embedder/chunking change without one. bge-small (512) ships as preset `bge_small` with a note that it is the recommended next default.
 
