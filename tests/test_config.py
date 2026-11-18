@@ -24,6 +24,17 @@ def test_typos_raise(monkeypatch):
         load_config()
 
 
-@pytest.mark.parametrize("preset", ["default", "minilm", "nomic", "small_llm"])
+@pytest.mark.parametrize("preset", ["default", "minilm", "nomic", "small_llm", "reranker"])
 def test_all_presets_load(preset):
     assert load_config(preset=preset)["collection"]
+
+
+def test_reranker_reorders_and_cuts_to_k(monkeypatch):
+    from langchain_core.documents import Document
+    from src import rag_chain as rc
+
+    docs = [Document(page_content=t) for t in ("a", "bb", "ccc")]
+    monkeypatch.setitem(rc.CFG, "reranker", "fake")
+    monkeypatch.setattr(rc, "get_db", lambda: type("DB", (), {"similarity_search": lambda self, q, k, filter: docs[:k]})())
+    monkeypatch.setattr(rc, "get_reranker", lambda: type("R", (), {"predict": lambda self, pairs: [len(d) for _, d in pairs]})())
+    assert [d.page_content for d in rc.retrieve("q", k=2)] == ["ccc", "bb"]  # fetched 3 (fetch_k), kept best 2

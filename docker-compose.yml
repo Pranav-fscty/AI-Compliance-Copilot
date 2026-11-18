@@ -7,7 +7,7 @@
 # First run:   docker compose up -d --build
 #              docker compose exec ollama ollama pull llama3.1      (once; skipped if models dir is shared)
 #              docker compose run --rm api python -m src.embed_store  (build the index for RAG_PRESET)
-# Preset:      RAG_PRESET=fast docker compose up -d
+# Preset:      $env:RAG_PRESET = "nomic"; docker compose up -d   (default | minilm | nomic | small_llm | reranker)
 # GPU Ollama:  $env:COMPOSE_FILE = "docker-compose.yml;docker-compose.gpu.yml"  (then plain `docker compose ...`;
 #              -f on `up` alone is lost when a later `run`/`exec` recreates ollama)
 

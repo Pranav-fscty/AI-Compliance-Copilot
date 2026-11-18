@@ -26,6 +26,7 @@ flowchart LR
     CLIENT["client / RAG X-Ray"] -->|POST /ask · GET /health| API["api (FastAPI)"]
     API -->|embed query| EMB2["embedder"]
     API -->|top_k similarity search| CHROMA
+    API -.->|"optional (preset reranker): fetch 24, keep top_k"| RR["cross-encoder reranker<br/>(in-process, CPU)"]
     API -->|prompt + chunks| OLLAMA["ollama<br/>llama3.1 8B"]
 
     EVAL["eval.run<br/>frozen gold set"] -->|imports rag_chain directly, not HTTP| RC["rag_chain.ask()"]
@@ -36,7 +37,8 @@ flowchart LR
 
 **Request path (`/ask`):** embed question, retrieve `top_k` chunks (optionally filtered by `law_type`), put them in the prompt in
 rank order, one Ollama call (`temperature 0`, `num_ctx 8192`), return the answer plus the `(source, section)` of every chunk in the
-prompt. If the model answers with the refusal sentence, citations are empty. No reranker, no hybrid search, no query rewriting.
+prompt. If the model answers with the refusal sentence, citations are empty. With `reranker` set (preset `reranker`), vector search fetches `rerank_fetch_k` chunks and a cross-encoder keeps the
+`top_k` best. No hybrid search, no query rewriting.
 
 ---
 
@@ -81,7 +83,7 @@ ollama pull llama3.1
 Build the index for the active preset:
 
 ```powershell
-python -m src.ingest        # only if you have data/raw (gitignored; data/processed/*.json is committed)
+python -m src.ingest        # data/raw -> data/processed (both committed; re-running reproduces them exactly)
 python -m src.chunk         # -> data/processed/chunks/<collection>/
 python -m src.embed_store   # -> chroma_db/, collection named in the preset
 uvicorn src.api:app --port 8000
@@ -213,9 +215,7 @@ docker-compose.gpu.yml GPU override for ollama
 ## Known limitations
 
 - Income-tax coverage is only Chapters I–III of the Act; questions about later chapters are refused or answered badly.
-- The raw source Markdown (`data/raw/`) is not in the repo, so a fresh clone can re-chunk and re-index but not re-ingest.
 - Section headings in citations are often noisy because of the PDF→Markdown conversion.
 - `/compare` and `/simplify` prompts are in code, not in `config.yaml`, and have no eval.
-- `reranker` accepts only `none`.
 
 No license file is included yet.

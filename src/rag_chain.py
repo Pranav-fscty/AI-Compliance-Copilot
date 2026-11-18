@@ -25,8 +25,6 @@ logger: logging.Logger = logging.getLogger("compliance-copilot.rag_chain")
 
 VALID_LAW_TYPES: frozenset[str] = frozenset(CFG["domains"])
 REFUSAL: str = "not available in the indexed documents"  # must match the refusal sentence in prompt_template
-if CFG["reranker"] != "none":
-    raise NotImplementedError(f"reranker={CFG['reranker']!r}: only 'none' is implemented")
 
 
 # ---------------------------------------------------------------------------
@@ -82,10 +80,23 @@ def get_db() -> Chroma:
     return load_vectorstore()
 
 
+@functools.lru_cache(maxsize=1)
+def get_reranker():
+    from sentence_transformers import CrossEncoder  # only loaded when a reranker is configured
+    logger.info("reranker=%s fetch_k=%s", CFG["reranker"], CFG["rerank_fetch_k"])
+    return CrossEncoder(CFG["reranker"], max_length=512, device="cpu")
+
+
 def retrieve(question: str, law_type: str | None = None, k: int | None = None) -> list[Document]:
-    """Top-k chunks for a question, optionally filtered to one law domain."""
+    """Top-k chunks for a question, optionally filtered to one law domain.
+    With a reranker: vector search fetches max(rerank_fetch_k, k), the cross-encoder keeps the k best."""
+    k = k or CFG["top_k"]
     filt = {"law_type": law_type} if law_type else None
-    return get_db().similarity_search(question, k=k or CFG["top_k"], filter=filt)
+    if CFG["reranker"] == "none":
+        return get_db().similarity_search(question, k=k, filter=filt)
+    docs = get_db().similarity_search(question, k=max(CFG["rerank_fetch_k"], k), filter=filt)
+    scores = get_reranker().predict([(question, d.page_content) for d in docs]) if docs else []
+    return [d for _, d in sorted(zip(scores, docs), key=lambda p: -p[0])][:k]
 
 
 def build_prompt(question: str, docs: list[Document]) -> str:

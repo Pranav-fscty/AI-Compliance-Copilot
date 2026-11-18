@@ -10,7 +10,6 @@ __pycache__/
 
 # Local database and raw data
 chroma_db/
-data/raw/
 
 # Virtual environment
 venv/

@@ -31,7 +31,8 @@ hnsw_search_ef: 100       # default 10 made results change between restarts
 # --- retrieval ---
 top_k: 8
 compare_k: 3
-reranker: none            # only "none" is implemented
+reranker: none            # none | an HF cross-encoder, e.g. BAAI/bge-reranker-base (runs in-process on CPU)
+rerank_fetch_k: 24        # with a reranker: fetch this many by vector search, keep the top_k best by cross-encoder score
 
 # --- generation ---
 llm_model: llama3.1
