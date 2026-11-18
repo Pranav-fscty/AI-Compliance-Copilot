@@ -11,9 +11,11 @@ experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none 
   run inside the api container indexed 1804 chunks into the chroma service (`compliance_bge_small_c512`) in 146 s.
 - `/health` 200 `{"status":"ok","index":"ok","llm":"ok"}`. `/ask` it01 returns the same answer text as the local
   llama3.1 eval run; an out-of-corpus question returns the refusal template with no citations.
-- **Ollama in the container runs on CPU, not the GPU.** `nvidia-smi` works inside the container, but Ollama's GPU
-  discovery reports only `cpu` (`total_vram="0 B"`), so the GPU override has no effect yet. Latency is CPU-bound:
-  ~8 s for a short answer, 37 s for a cold first request. Not investigated further.
+- **GPU:** it first looked like Ollama ignored the GPU. The real cause: `docker compose run`/`exec` without the
+  `-f docker-compose.gpu.yml` override recreated the ollama container from the base file, which has no GPU
+  (`DeviceRequests: null`). With the override on every command (`COMPOSE_FILE`, see README), Ollama detects the
+  RTX 4050 (CUDA, 6 GiB) and runs llama3.1 ~89% on GPU. Short answer: 4.6 s warm (8.3 s on CPU). The first request
+  after a restart takes ~170 s, because the model is loaded from the Windows models folder through the WSL mount.
 - MLflow only checked as healthy; no eval run was logged to it.
 
 ## Post-release: gold set human-checked
@@ -99,7 +101,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 1. ~~Gold set not human-verified~~ Resolved after release: checked by the owner on 2026-11-18, no changes (see above).
 2. ~~LLM benchmark not run~~ Resolved after release: all three LLMs evaluated, llama3.1 kept (see above).
 3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
-4. ~~Docker Compose stack never run end to end~~ Resolved after release: runs and answers (see above); Ollama in the container still runs on CPU.
+4. ~~Docker Compose stack never run end to end~~ Resolved after release: runs and answers on GPU (see above).
 5. `small_llm` and `nomic` presets have no answer eval.
 6. Income Tax coverage is still only Chapters I–III. `data/raw/` is not in git.
 7. `/compare` and `/simplify` prompts are in code and have no eval. `reranker` accepts only `none`.

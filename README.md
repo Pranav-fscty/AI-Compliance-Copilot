@@ -111,10 +111,12 @@ curl.exe http://localhost:8000/health
 
 - The `ollama` container mounts your host models folder (`%USERPROFILE%\.ollama\models`), so models aren't downloaded again.
   Its image tag must match your host Ollama version (`OLLAMA_IMAGE_TAG`). Without that folder, run `docker compose exec ollama ollama pull llama3.1`.
-- GPU: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` (needs the NVIDIA driver with WSL2 support).
+- GPU: run `$env:COMPOSE_FILE = "docker-compose.yml;docker-compose.gpu.yml"` first, so **every** `docker compose`
+  command (including `run` and `exec`) keeps the GPU. Passing `-f` only to `up` isn't enough: a later `docker compose run`
+  without it recreates the ollama container without the GPU. Needs the NVIDIA driver with WSL2 support.
 - Ports: api 8000, chroma 8001, mlflow 5000. Ollama isn't published, because the host Ollama already uses 11434.
-- **Status:** run end to end on 2026-11-18 (all four healthy, `/ask` answers). Known issue: Ollama in the container
-  doesn't detect the GPU even with the GPU override, so generation runs on CPU (see CHANGELOG).
+- **Status:** run end to end on 2026-11-18 with the GPU override (all four healthy, `/ask` answers). The first request
+  after a restart is slow (~170 s) while the model loads from the Windows models folder.
 
 ---
 
