@@ -4,6 +4,18 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: Docker Compose stack run end to end
+
+2026-11-18, Docker Desktop 29.9.2, `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`:
+- All four services (api, chroma, ollama, mlflow) start and pass their healthchecks. `src.chunk` + `src.embed_store`
+  run inside the api container indexed 1804 chunks into the chroma service (`compliance_bge_small_c512`) in 146 s.
+- `/health` 200 `{"status":"ok","index":"ok","llm":"ok"}`. `/ask` it01 returns the same answer text as the local
+  llama3.1 eval run; an out-of-corpus question returns the refusal template with no citations.
+- **Ollama in the container runs on CPU, not the GPU.** `nvidia-smi` works inside the container, but Ollama's GPU
+  discovery reports only `cpu` (`total_vram="0 B"`), so the GPU override has no effect yet. Latency is CPU-bound:
+  ~8 s for a short answer, 37 s for a cold first request. Not investigated further.
+- MLflow only checked as healthy; no eval run was logged to it.
+
 ## Post-release: gold set human-checked
 
 2026-11-18: the owner checked the gold_v2 reference answers by hand and changed none of them. `eval/gold_v2.jsonl`
@@ -87,7 +99,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 1. ~~Gold set not human-verified~~ Resolved after release: checked by the owner on 2026-11-18, no changes (see above).
 2. ~~LLM benchmark not run~~ Resolved after release: all three LLMs evaluated, llama3.1 kept (see above).
 3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
-4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.
+4. ~~Docker Compose stack never run end to end~~ Resolved after release: runs and answers (see above); Ollama in the container still runs on CPU.
 5. `small_llm` and `nomic` presets have no answer eval.
 6. Income Tax coverage is still only Chapters I–III. `data/raw/` is not in git.
 7. `/compare` and `/simplify` prompts are in code and have no eval. `reranker` accepts only `none`.

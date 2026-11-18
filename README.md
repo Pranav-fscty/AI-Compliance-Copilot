@@ -113,7 +113,8 @@ curl.exe http://localhost:8000/health
   Its image tag must match your host Ollama version (`OLLAMA_IMAGE_TAG`). Without that folder, run `docker compose exec ollama ollama pull llama3.1`.
 - GPU: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` (needs the NVIDIA driver with WSL2 support).
 - Ports: api 8000, chroma 8001, mlflow 5000. Ollama isn't published, because the host Ollama already uses 11434.
-- **Status:** the compose files pass `docker compose config`, but the full stack has not been run end to end yet (see CHANGELOG).
+- **Status:** run end to end on 2026-11-18 (all four healthy, `/ask` answers). Known issue: Ollama in the container
+  doesn't detect the GPU even with the GPU override, so generation runs on CPU (see CHANGELOG).
 
 ---
 
