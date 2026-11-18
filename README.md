@@ -58,6 +58,9 @@ Retrieval numbers are without a domain filter.
 | Wrongly refuses in-corpus questions | 20% | 19% | 12.5% |
 | `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s | 3.8 s / 9.7 s |
 
+Per-preset results, including the `reranker` preset (correctness 3.80, 59% correct, 9% false refusals, +2.1 s p50),
+are in the CHANGELOG ("cross-encoder reranker, preset evals").
+
 As-shipped numbers are on gold v1; the other two columns are on gold v2 (identical retrieval numbers on v1 and v2). Every
 step changes several things at once; see the CHANGELOG for what changed between columns.
 
@@ -134,8 +137,9 @@ or `RAG_*` variable raises an error instead of being ignored.
 |---|---|---|---|---|
 | `default` | bge-small-en-v1.5, HF (512) | 8 | llama3.1 8B | full |
 | `minilm` | all-MiniLM-L6-v2, HF (256) | 8 | llama3.1 8B | full (the Phase 2 pipeline) |
-| `nomic` | nomic-embed-text, Ollama (500) | 5 | llama3.1 8B | retrieval only |
-| `small_llm` | bge-small-en-v1.5, HF (512) | 4 | qwen3.5:4b | see CHANGELOG (judge = same model) |
+| `reranker` | bge-small-en-v1.5, HF (512) + ms-marco-MiniLM-L-6 cross-encoder (fetch 24) | 8 | llama3.1 8B | full (best answers so far) |
+| `nomic` | nomic-embed-text, Ollama (500) | 5 | llama3.1 8B | full |
+| `small_llm` | bge-small-en-v1.5, HF (512) | 4 | qwen3.5:4b | full (judge = same model, likely flattered) |
 
 Each preset uses its own Chroma collection, so all of them can be indexed side by side:
 

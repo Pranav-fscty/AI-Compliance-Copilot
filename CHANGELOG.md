@@ -4,6 +4,47 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: cross-encoder reranker, preset evals, raw data in git
+
+**Reranker.** `retrieve()` (the app's only retrieval path, also used by the eval) can now rerank: with `reranker` set,
+vector search fetches `rerank_fetch_k` (24) chunks and a cross-encoder keeps the `top_k` best. New preset `reranker` =
+default + `cross-encoder/ms-marco-MiniLM-L-6-v2`; only the reranker differs, so it is the "reranker-on" pair for RAG X-Ray.
+
+Retrieval only, gold_v2, no domain filter (MLflow `rerank_*`):
+
+| | no reranker (default) | ms-marco-MiniLM-L-6-v2 | bge-reranker-base |
+|---|---|---|---|
+| hit@1 / hit@5 / hit@8 | 0.672 / 0.813 / 0.828 | 0.688 / 0.859 / 0.875 | 0.719 / 0.875 / 0.906 |
+| MRR@10 | 0.732 | 0.757 | 0.776 |
+| multi-section full coverage@5 | 0.429 | 0.571 | 0.429 |
+| retrieval p50 (CPU) | 0.03 s | 1.6 s | 9.4 s |
+
+MiniLM was chosen for the preset: most of the gain for +1.6 s instead of +9.4 s per query.
+
+**Answer evals for every preset.** Same gold_v2, same judge (qwen3.5:4b), MLflow `preset_reranker`, `preset_nomic`,
+`preset_small_llm`; `default` is `bench_llm_llama3.1`. 64 in-corpus questions, 1 question = 1.6 points.
+
+| | `default` | `reranker` | `nomic` (top_k 5) | `small_llm` (qwen3.5:4b, top_k 4) |
+|---|---|---|---|---|
+| hit@1 / hit@8 | 0.672 / 0.828 | 0.688 / 0.875 | 0.625 / 0.859 | 0.672 / 0.828 |
+| correctness (1–5) | 3.34 | **3.80** | 3.44 | 3.30 |
+| correct rate (≥4) | 0.500 (32) | **0.594 (38)** | 0.469 (30) | 0.469 (30) |
+| faithfulness | 0.813 (52) | 0.828 (53) | **0.859 (55)** | 0.750 (48) |
+| false refusal rate | 0.125 (8) | **0.094 (6)** | 0.172 (11) | 0.188 (12) |
+| refusal accuracy (ooc) | 1.0 | 1.0 | 1.0 | 1.0 |
+| /ask p50 / p95 | 3.8 s / 9.7 s | 5.9 s / 13.8 s | 2.8 s / 10.1 s | 1.4 s / 5.7 s |
+| prompt tokens p50 | 1611 | 1526 | 890 | 823 |
+
+- `reranker` is the best pipeline measured so far: +6 correct answers, 2 fewer false refusals, faithfulness level,
+  for +2.1 s at p50. It is **not** made the default (that changes the X-Ray target; owner's call).
+- `nomic` is the most faithful but refuses the most in-corpus questions (fewer, shorter chunks in the prompt).
+- `small_llm` is the fastest and the weakest; its correctness is self-judged (judge = same model), so likely flattered.
+- One judge pass per preset; judge variance not measured.
+
+**Raw data in git.** `data/raw/` (1.3 MB of public legal texts) is committed byte-exact (`.gitattributes: -text`);
+`python -m src.ingest` on it reproduces the committed `data/processed/*.json` exactly. `docs/architecture.png` (old
+single-container design) removed; the README's Mermaid diagram is the architecture.
+
 ## Post-release: Docker Compose stack run end to end
 
 2026-11-18, Docker Desktop 29.9.2, `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`:
@@ -102,10 +143,10 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 2. ~~LLM benchmark not run~~ Resolved after release: all three LLMs evaluated, llama3.1 kept (see above).
 3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
 4. ~~Docker Compose stack never run end to end~~ Resolved after release: runs and answers on GPU (see above).
-5. `small_llm` and `nomic` presets have no answer eval.
-6. Income Tax coverage is still only Chapters I–III. `data/raw/` is not in git.
-7. `/compare` and `/simplify` prompts are in code and have no eval. `reranker` accepts only `none`.
-8. `docs/architecture.png` shows the old single-container design and is no longer referenced by the README.
+5. ~~`small_llm` and `nomic` presets have no answer eval~~ Resolved after release (see above).
+6. Income Tax coverage is still only Chapters I–III (kept, owner's decision). ~~`data/raw/` is not in git~~ committed.
+7. `/compare` and `/simplify` prompts are in code and have no eval. ~~`reranker` accepts only `none`~~ cross-encoder reranker added.
+8. ~~`docs/architecture.png` is stale~~ removed.
 
 ## Phase 4: separate services, presets, ground truth, black-box API
 

@@ -1,5 +1,5 @@
 # small_llm: default retriever (bge-small, 512-token chunks) but qwen3.5:4b as the LLM and top_k 4.
 # Different generator family/size and context width from default, for black-box fingerprinting tests.
-# Eval status: NOT evaluated. Note qwen3.5:4b is also the eval judge, so its scores would carry self-preference bias.
+# Eval status: full (MLflow preset_small_llm): correctness 3.30 (self-judged), faithfulness 0.75. See CHANGELOG.
 llm_model: qwen3.5:4b
 top_k: 4
