@@ -4,6 +4,11 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Post-release: gold set human-checked
+
+2026-11-18: the owner checked the gold_v2 reference answers by hand and changed none of them. `eval/gold_v2.jsonl`
+was not edited (its `author` fields still say `claude-draft`) so its hash, and every logged run, stays comparable.
+
 ## Post-release: LLM benchmark completed
 
 `python -m eval.bench llms` on the default retriever (bge-small-en-v1.5, 512-token chunks, top_k 8), gold_v2, judge
@@ -79,7 +84,7 @@ Summary of the refinement (Phases 0–5). Detail per phase below.
 - Ground truth for RAG X-Ray: `python -m src.manifest`; the API is black-box by default.
 
 **Not done / not verified (read before relying on this release)**
-1. **Gold set not human-verified:** 0 of 74 items checked by a person (a self-check by the drafting model was done after release; see above).
+1. ~~Gold set not human-verified~~ Resolved after release: checked by the owner on 2026-11-18, no changes (see above).
 2. ~~LLM benchmark not run~~ Resolved after release: all three LLMs evaluated, llama3.1 kept (see above).
 3. ~~Default config not changed~~ Resolved after release: bge-small (512) evaluated end to end and made the default (see above).
 4. **Docker Compose stack never run end to end:** Docker Desktop's engine failed to start on the dev machine. Config is validated; Chroma server mode was tested outside Docker.

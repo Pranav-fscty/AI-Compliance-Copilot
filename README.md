@@ -60,7 +60,7 @@ As-shipped numbers are on gold v1; the other two columns are on gold v2 (identic
 step changes several things at once; see the CHANGELOG for what changed between columns.
 
 Caveats: 64 in-corpus questions, so one question = 1.6 points. All 74 gold items were drafted by an LLM and
-re-checked against the source by the same LLM, but **not** human-verified. The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
+re-checked against the source by the same LLM, then checked by hand by the owner (2026-11-18, no changes). The judge is a 4B model; use the numbers to compare runs, not as absolute truth.
 Full history, including what was wrong with the old "85%" claim: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
