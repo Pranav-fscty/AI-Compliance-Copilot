@@ -1,3 +1,4 @@
-# default: config.yaml as is. bge-small-en-v1.5 (512-token chunks) + llama3.1 8B, top_k 8.
-# Eval status: full (MLflow run bench_llm_llama3.1 on gold_v2). See CHANGELOG.md "Default switched".
+# default: config.yaml as is. bge-small-en-v1.5 (512-token chunks), ms-marco-MiniLM-L-6 cross-encoder reranker
+# (fetch 24, keep 8) + llama3.1 8B.
+# Eval status: full (MLflow preset_reranker): correctness 3.80, faithfulness 0.83, false refusals 0.09. See CHANGELOG.
 {}

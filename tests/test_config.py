@@ -24,7 +24,7 @@ def test_typos_raise(monkeypatch):
         load_config()
 
 
-@pytest.mark.parametrize("preset", ["default", "minilm", "nomic", "small_llm", "reranker"])
+@pytest.mark.parametrize("preset", ["default", "minilm", "nomic", "small_llm", "no_reranker"])
 def test_all_presets_load(preset):
     assert load_config(preset=preset)["collection"]
 

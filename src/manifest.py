@@ -1,7 +1,7 @@
 """Write ground_truth/pipeline_manifest.json: the true pipeline for the active preset.
 
     python -m src.manifest                  # active preset (RAG_PRESET, default "default")
-    RAG_PRESET=fast python -m src.manifest
+    RAG_PRESET=nomic python -m src.manifest
 
 This is the answer key RAG X-Ray's guesses are scored against. The API never reads or serves it,
 and ground_truth/ is excluded from the Docker image.

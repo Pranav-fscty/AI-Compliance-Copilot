@@ -10,3 +10,4 @@ chunk_size: 500
 chunk_overlap: 64
 top_k: 5
 collection: compliance_nomic_c500
+reranker: none   # evaluated without the reranker; kept so the numbers stay valid

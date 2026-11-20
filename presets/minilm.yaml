@@ -6,3 +6,4 @@ embed_query_prefix: ""
 chunk_size: 256
 chunk_overlap: 32
 collection: compliance_minilm_c256
+reranker: none   # evaluated without the reranker; kept so the numbers stay valid

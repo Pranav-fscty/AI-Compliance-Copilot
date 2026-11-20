@@ -26,7 +26,7 @@ flowchart LR
     CLIENT["client / RAG X-Ray"] -->|POST /ask · GET /health| API["api (FastAPI)"]
     API -->|embed query| EMB2["embedder"]
     API -->|top_k similarity search| CHROMA
-    API -.->|"optional (preset reranker): fetch 24, keep top_k"| RR["cross-encoder reranker<br/>(in-process, CPU)"]
+    API -->|"fetch 24, keep top_k (off in preset no_reranker)"| RR["cross-encoder reranker<br/>(in-process, CPU)"]
     API -->|prompt + chunks| OLLAMA["ollama<br/>llama3.1 8B"]
 
     EVAL["eval.run<br/>frozen gold set"] -->|imports rag_chain directly, not HTTP| RC["rag_chain.ask()"]
@@ -37,8 +37,8 @@ flowchart LR
 
 **Request path (`/ask`):** embed question, retrieve `top_k` chunks (optionally filtered by `law_type`), put them in the prompt in
 rank order, one Ollama call (`temperature 0`, `num_ctx 8192`), return the answer plus the `(source, section)` of every chunk in the
-prompt. If the model answers with the refusal sentence, citations are empty. With `reranker` set (preset `reranker`), vector search fetches `rerank_fetch_k` chunks and a cross-encoder keeps the
-`top_k` best. No hybrid search, no query rewriting.
+prompt. If the model answers with the refusal sentence, citations are empty. Retrieval is two-stage: vector search fetches `rerank_fetch_k` (24) chunks and a cross-encoder
+(`ms-marco-MiniLM-L-6-v2`, CPU) keeps the `top_k` best (`reranker: none` turns this off). No hybrid search, no query rewriting.
 
 ---
 
@@ -48,20 +48,19 @@ Frozen eval set `eval/gold_v2.jsonl` (v1 with 4 ambiguous quotes fixed; same num
 from `data/raw`, so it works for any chunking. Judge = qwen3.5:4b (different model family from the generator), temperature 0.
 Retrieval numbers are without a domain filter.
 
-| | as shipped (v1) | Phase 2 fixes (`minilm` preset) | **`default` (bge-small, 512)** |
+| | as shipped (v1) | Phase 2 fixes (`minilm` preset) | bge-small, 512 (`no_reranker` preset) | **`default` (+ reranker)** |
 |---|---|---|---|
-| hit@1 / hit@5 / hit@8 | 0.594 / 0.734 / 0.766 | 0.547 / 0.750 / 0.813 | 0.672 / 0.813 / 0.828 |
-| MRR@10 | 0.653 | 0.651 | 0.732 |
-| Answer correctness (judge, 1–5) | 2.75 | 3.22 | 3.34 |
-| Faithful to retrieved context | 61% | 75% | 81% |
-| Refuses out-of-corpus questions | 10/10 | 10/10 | 10/10 |
-| Wrongly refuses in-corpus questions | 20% | 19% | 12.5% |
-| `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s | 3.8 s / 9.7 s |
+| hit@1 / hit@5 / hit@8 | 0.594 / 0.734 / 0.766 | 0.547 / 0.750 / 0.813 | 0.672 / 0.813 / 0.828 | 0.688 / 0.859 / 0.875 |
+| MRR@10 | 0.653 | 0.651 | 0.732 | 0.757 |
+| Answer correctness (judge, 1–5) | 2.75 | 3.22 | 3.34 | 3.80 |
+| Faithful to retrieved context | 61% | 75% | 81% | 83% |
+| Refuses out-of-corpus questions | 10/10 | 10/10 | 10/10 | 10/10 |
+| Wrongly refuses in-corpus questions | 20% | 19% | 12.5% | 9.4% |
+| `/ask` latency p50 / p95 | 3.3 s / 11.8 s | 2.1 s / 8.8 s | 3.8 s / 9.7 s | 5.9 s / 13.8 s |
 
-Per-preset results, including the `reranker` preset (correctness 3.80, 59% correct, 9% false refusals, +2.1 s p50),
-are in the CHANGELOG ("cross-encoder reranker, preset evals").
+Per-preset results are in the CHANGELOG ("cross-encoder reranker, preset evals"; the `reranker` column there is today's `default`).
 
-As-shipped numbers are on gold v1; the other two columns are on gold v2 (identical retrieval numbers on v1 and v2). Every
+As-shipped numbers are on gold v1; the other columns are on gold v2 (identical retrieval numbers on v1 and v2). Every
 step changes several things at once; see the CHANGELOG for what changed between columns.
 
 Caveats: 64 in-corpus questions, so one question = 1.6 points. All 74 gold items were drafted by an LLM and
@@ -135,9 +134,9 @@ or `RAG_*` variable raises an error instead of being ignored.
 
 | `RAG_PRESET` | Embedder (chunk tokens) | top_k | LLM | Eval status |
 |---|---|---|---|---|
-| `default` | bge-small-en-v1.5, HF (512) | 8 | llama3.1 8B | full |
+| `default` | bge-small-en-v1.5, HF (512) + ms-marco-MiniLM-L-6 cross-encoder (fetch 24) | 8 | llama3.1 8B | full (best answers) |
 | `minilm` | all-MiniLM-L6-v2, HF (256) | 8 | llama3.1 8B | full (the Phase 2 pipeline) |
-| `reranker` | bge-small-en-v1.5, HF (512) + ms-marco-MiniLM-L-6 cross-encoder (fetch 24) | 8 | llama3.1 8B | full (best answers so far) |
+| `no_reranker` | bge-small-en-v1.5, HF (512), no reranker | 8 | llama3.1 8B | full (the previous default) |
 | `nomic` | nomic-embed-text, Ollama (500) | 5 | llama3.1 8B | full |
 | `small_llm` | bge-small-en-v1.5, HF (512) | 4 | qwen3.5:4b | full (judge = same model, likely flattered) |
 

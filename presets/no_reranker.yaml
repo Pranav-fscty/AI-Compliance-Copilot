@@ -1,0 +1,5 @@
+# no_reranker: the default pipeline without the cross-encoder (bge-small, 512-token chunks, llama3.1, top_k 8,
+# plain vector search). Was the default until the reranker eval; it is the "reranker-off" comparison for RAG X-Ray.
+# Same collection as default (no re-indexing needed).
+# Eval status: full (MLflow bench_llm_llama3.1): correctness 3.34, faithfulness 0.81, false refusals 0.125. See CHANGELOG.
+reranker: none

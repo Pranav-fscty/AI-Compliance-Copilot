@@ -4,6 +4,17 @@ Every number below comes from `python -m eval.run` on the frozen set `eval/gold_
 (74 items, sha256 `5dc17436fce5f83c…`) with the same judge (qwen3.5:4b, temp 0, seed 0), logged to MLflow
 experiment `xray-target-eval`. All 74 gold items are still `claude-draft`; none have been human-verified yet.
 
+## Reranker is now the default
+
+On the answer evals below, the `reranker` pipeline was the best measured (+6 correct of 64, 2 fewer false refusals,
+faithfulness level) for +2.1 s p50, so it is now `config.yaml`'s default: `reranker: cross-encoder/ms-marco-MiniLM-L-6-v2`,
+`rerank_fetch_k: 24`. The `reranker` preset is renamed `no_reranker` (`reranker: none`) and is the previous default,
+kept as the "reranker-off" pair for RAG X-Ray. `minilm`, `nomic` and `small_llm` pin `reranker: none`, so their
+numbers below still describe what they run. In the table below, today's `default` = the `reranker` column and
+`no_reranker` = the `default` column. RAG X-Ray's default target changed: regenerate the manifest
+(`python -m src.manifest`) before scoring. First request after a fresh start downloads the cross-encoder (~90 MB,
+cached in the `hf-cache` volume under Docker).
+
 ## Post-release: cross-encoder reranker, preset evals, raw data in git
 
 **Reranker.** `retrieve()` (the app's only retrieval path, also used by the eval) can now rerank: with `reranker` set,

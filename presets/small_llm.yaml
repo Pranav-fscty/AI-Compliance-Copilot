@@ -3,3 +3,4 @@
 # Eval status: full (MLflow preset_small_llm): correctness 3.30 (self-judged), faithfulness 0.75. See CHANGELOG.
 llm_model: qwen3.5:4b
 top_k: 4
+reranker: none   # evaluated without the reranker; kept so the numbers stay valid

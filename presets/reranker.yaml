@@ -1,5 +1,0 @@
-# reranker: default pipeline (bge-small, 512-token chunks, llama3.1, top_k 8) plus a cross-encoder reranker:
-# vector search fetches 24 chunks, cross-encoder/ms-marco-MiniLM-L-6-v2 keeps the 8 best. Only the reranker differs from default,
-# so it is the "reranker-on" comparison for RAG X-Ray. Same collection as default (no re-indexing needed).
-# Eval status: full (MLflow preset_reranker): correctness 3.80, faithfulness 0.83, false refusals 0.09. See CHANGELOG.
-reranker: cross-encoder/ms-marco-MiniLM-L-6-v2   # bge-reranker-base: +3 hit@8 more but 9.4 s vs 1.6 s per query on CPU (CHANGELOG)
